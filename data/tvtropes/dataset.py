@@ -4,8 +4,8 @@ import pandas as pd
 from dataclasses import dataclass, field
 
 URL = "https://drive.usercontent.google.com/download?id=1Duyz5ATlLHzwMidj15bWVnWHpdE4aRXn&export=download"
-ZIP_PATH = Path("TVTropesData.zip")
-DATA_FOLDER_PATH= Path("TVTropesData")
+ZIP_PATH = Path("data", "tvtropes", "TVTropesData.zip")
+DATA_FOLDER_PATH= Path("data","tvtropes","TVTropesData")
 
 def download(url=URL):
     import requests
@@ -31,7 +31,7 @@ class TVTropesDataset:
     tv_tropes: pd.DataFrame = field(default=None)
 
     @classmethod
-    def from_csv_files(cls, csv_dir: str) -> 'TVTropesDataset':
+    def from_csv_files(cls, csv_dir: str = DATA_FOLDER_PATH) -> 'TVTropesDataset':
         """Initialize the dataset from CSV files in the specified directory"""
         dataset = cls()
         csv_files = {
@@ -46,8 +46,8 @@ class TVTropesDataset:
         }
 
         for attr, filename in csv_files.items():
-            file_path = f"{csv_dir}/{filename}"
+            file_path = csv_dir/filename
             setattr(dataset, attr, pd.read_csv(file_path))
 
         return dataset
-
+    
