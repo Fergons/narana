@@ -1,21 +1,39 @@
+
 import os
 from pathlib import Path
 import pandas as pd
 from dataclasses import dataclass, field
+ 
+"""
+Dataset description
+Each line of reddit_short_stories.txt is one full short story.
+Each short story begins with an "<sos>" token and ends with an "<eos>" token (eg. "<sos> once upon a time, the end <eos>").
+Newline characters in a story are replaced with the "<nl>" token (eg. "<sos> line 1 <nl> line 2 <eos>")
+"""
+@dataclass
+class Story:
+    _id: int
+    text: str
 
-URL = "https://drive.usercontent.google.com/download?id=1Duyz5ATlLHzwMidj15bWVnWHpdE4aRXn&export=download"
-ZIP_PATH = Path("data", "tvtropes", "TVTropesData.zip")
-DATA_FOLDER_PATH= Path("data","tvtropes","TVTropesData")
+@dataclass
+class RedditShortStoriesDataset:
+    path = Path()
+    def __init__ (self, path):
+        self.path = path
+        self.stories = self.__load()
 
-def download(url=URL):
-    import requests
-    r = requests.get(url, allow_redirects=True)
-    open(ZIP_PATH, 'wb').write(r.content)
-
-def unzip(path=ZIP_PATH):
-    import zipfile
-    with zipfile.ZipFile(path, 'r') as zip_ref:
-        zip_ref.extractall(".")
+    @staticmethod
+    def process_line(line):
+    # strip <sos> and <eos> tags and replace <nl> for newlines
+        return line.replace("<sos> ", "").replace(" <eos>", "").replace(" <nl> ", "\n")
+    
+    def __load(self):
+        with open(self.path) as f:
+            for _id, line in enumerate(f):
+                yield Story(_id, self.process_line(line))
+        
+    def __iter__(self):
+        yield from self.stories
 
 
 @dataclass
@@ -31,8 +49,9 @@ class TVTropesDataset:
     tv_tropes: pd.DataFrame = field(default=None)
 
     @classmethod
-    def from_csv_files(cls, csv_dir: str = DATA_FOLDER_PATH) -> 'TVTropesDataset':
+    def from_csv_files(cls, csv_dir: Path|str) -> 'TVTropesDataset':
         """Initialize the dataset from CSV files in the specified directory"""
+        csv_dir = Path(csv_dir)
         dataset = cls()
         csv_files = {
             'film_imdb_match': 'film_imdb_match.csv',
