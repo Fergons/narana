@@ -10,6 +10,10 @@ python = "^3.12.7"
 torch = {version = "^2.5.0+cu124", source = "pytorch-gpu"}
 sentence-transformers = "^3.2.1"
 pandas = "^2.2.3"
+protobuf = "^5.28.3"
+sentencepiece = "^0.2.0"
+flagembedding = "^1.2.11"
+pyvespa = "^0.50.0"
 
 
 [[tool.poetry.source]]
