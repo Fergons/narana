@@ -6,7 +6,7 @@ import os
 import tqdm
 from pathlib import Path
 from .dataset import BookCompanion
-
+import re
 
 def epub_to_txt(epub_path, txt_output_path):
     # Load the EPUB book
@@ -21,7 +21,12 @@ def epub_to_txt(epub_path, txt_output_path):
             soup = BeautifulSoup(item.get_content(), 'html.parser')
             # Extract and append the text
             text = soup.get_text()
-            full_text.append(text.replace("\n", ""))
+            #match two or more consecutive newlines and replace with a single newline
+            text = text.strip()
+            if not text:
+                continue
+            clean_text = re.sub(r'\n{2,}', '\n', text)
+            full_text.append(clean_text)
 
     # Combine all text segments into a single string
     complete_text = '\n\n'.join(full_text)

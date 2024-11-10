@@ -16,6 +16,7 @@ flagembedding = "^1.2.11"
 pyvespa = "^0.50.0"
 peft = "^0.13.2"
 python-dotenv = "^1.0.1"
+nltk = "^3.9.1"
 
 
 [[tool.poetry.source]]

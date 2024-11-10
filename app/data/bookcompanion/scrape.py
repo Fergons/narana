@@ -95,9 +95,9 @@ def extract_character_list(html_content):
             if len(cells) >= 7:
                 indices = [2, 4, 6]
 
-            first_name = indices[0].get_text(strip=True)
-            last_name = indices[1].get_text(strip=True)
-            description = indices[2].get_text(strip=True)
+            first_name = cells[indices[0]].get_text(strip=True)
+            last_name =  cells[indices[1]].get_text(strip=True)
+            description =  cells[indices[2]].get_text(strip=True)
             extracted_data.append({
                 'first_name': first_name.strip().replace('\n', ' ').replace('\t', ''),
                 'last_name': last_name.strip().replace('\n', ' ').replace('\t', ''),
