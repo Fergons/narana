@@ -50,6 +50,8 @@ class BookCompanion:
       
    
     def save_book_list(self):
+        if not self.DATASET_PATH.exists():
+            self.DATASET_PATH.mkdir(parents=True)
         self.book_list.to_csv(self.DATASET_PATH / self._file_names['book_list'], index=False)
     
     def save_characters(self):
