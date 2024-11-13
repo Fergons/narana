@@ -1,1 +1,11 @@
 *.csv
+__pycache__
+*.txt
+*.zip
+.env
+poetry.lock
+.venv
+*.epub
+*.tsv
+*.pdf
+/data/
