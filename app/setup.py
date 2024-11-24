@@ -47,10 +47,18 @@ def package_dataset(config_path: str | Path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create TV Tropes dataset structure.")
-    parser.add_argument("--setup", action="store_true", help="Create dataset structure.")
-    parser.add_argument("--dir", type=str, default="./data", help="Path to directory to create dataset structure in.")
+    parser.add_argument("--dir", type=str, default=None, help="Path to directory to create dataset structure in.")
     args = parser.parse_args()
-    if args.setup:
-        create_dataset_structure(args.dir)
+    if args.dir:
+        _dir = args.dir
+    else:
+        from dotenv import dotenv_values
+        env = dotenv_values(".env")
+        _dir = env.get("DATA_FOLDER", "./data")
+        
+    create_dataset_structure(_dir)
+
+    
+
 
 
