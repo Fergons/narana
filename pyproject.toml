@@ -19,6 +19,12 @@ python-dotenv = "^1.0.1"
 nltk = "^3.9.1"
 pydantic = "^2.9.2"
 pytest = "^8.3.3"
+instructor = "^1.6.4"
+litellm = "^1.52.12"
+tqdm = "^4.67.0"
+tenacity = "^9.0.0"
+orjson = "^3.10.11"
+outlines = "^0.1.5"
 
 
 [[tool.poetry.source]]
@@ -37,7 +43,6 @@ seaborn = "^0.13.2"
 
 [tool.poetry.group.bookcompanion.dependencies]
 ebooklib = "^0.18"
-aiolimiter = "^1.1.0"
 libgen-api-enhanced = "^1.0.4"
 rapidfuzz = "^3.10.1"
 

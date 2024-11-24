@@ -39,6 +39,7 @@ def epub_to_txt(epub_path, txt_output_path):
 
 # Example usage
 if __name__ == "__main__":
+    
     epubs_dir = Path(BookCompanion.DATASET_PATH)
     for epub_file in tqdm.tqdm(epubs_dir.glob("*.epub")):
         txt_output_path = epub_file.with_suffix(".txt")
