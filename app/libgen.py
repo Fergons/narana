@@ -8,6 +8,7 @@ import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from anyio.streams.file import FileWriteStream
 import re
+from utils.string import camel_to_string
 
 import orjson
 from app.config import dataset_config
@@ -119,7 +120,7 @@ def extract_download_page_links(td: BeautifulSoup) -> list[str]:
 
 async def produce_search_results_for_title(session: httpx.AsyncClient, title: Title, send_stream: MemoryObjectSendStream):
     # substitute uppercase letters before that letter followed by a space
-    processed_title = re.sub(r'([A-Z])', r' \1', title.title).strip()
+    processed_title = camel_to_string(title.title)
     results = await search(session, q=f'{processed_title} {title.author if title.author else ""}')
     await send_stream.send({"title_id": title.title_id, 'hits': results})
     await send_stream.aclose()
