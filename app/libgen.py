@@ -48,9 +48,10 @@ async def search(
     for item in data:
         item["language"] = language
         item["format"] = format
-        item["download_urls"] = await resolve_download_links(
-            session, item["download_urls"]
-        )
+        if resolve_downloads:
+            item["download_urls"] = await resolve_download_links(
+                session, item["download_urls"]
+            )
 
     return data
 

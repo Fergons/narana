@@ -8,6 +8,7 @@ from pydantic import (
     UUID4,
     field_validator,
     ValidationError,
+    ConfigDict
 )
 from typing import Literal
 from uuid import uuid4
@@ -41,4 +42,25 @@ class Embedding(BaseModel):
     model: str
     document_id: UUID4
     embedding: list[float]
-    
+
+
+class Book(BaseModel):
+    title_id: str = Field(..., alias="title_id")
+    title: str
+    author: str | None
+    download_url: HttpUrl
+    format: Literal["epub", "pdf", "txt"]
+
+    model_config = ConfigDict(extra='ignore')
+
+
+# class EpubBook(BaseModel):
+#     title_id: str = Field(..., alias="title_id")
+#     text: str
+#     paragraph_spans: list[tuple[int, int]]
+#     chapter_spans: dict[str, tuple[int, int]]
+#     chapter_names: dict[str, str]
+
+#     model_config = ConfigDict(extra='ignore')
+
+
