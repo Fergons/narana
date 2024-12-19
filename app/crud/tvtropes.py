@@ -2,21 +2,20 @@ from abc import abstractmethod
 import pandas as pd
 from dataclasses import dataclass
 from app.config import dataset_config
-from app.models.tvtropes import TropeExample, TROPE_EXAMPLES_TABLES, TROPES_TABLE, Trope, Title
-from pydantic import TypeAdapter, AliasPath
-from typing import Generator
-
+from app.models.tvtropes import TropeExample, TROPE_EXAMPLES_TABLES, TROPES_TABLE, Trope, Title, TropeExample
+from pydantic import TypeAdapter
+from typing import Generator, Generic, TypeVar
 
 
 @dataclass
 class BaseTropesCRUD:
-    name: TROPE_EXAMPLES_TABLES | TROPES_TABLE
+    name: str
     df: pd.DataFrame
 
     @classmethod
     def load_from_csv(cls, name: TROPE_EXAMPLES_TABLES | TROPES_TABLE):
         df = pd.read_csv(dataset_config.get_csv_file_path(name))
-        return cls(name=name, df=df)
+        return cls(df=df, name=name)
 
     def save_to_csv(self):
         self.df.to_csv(dataset_config.get_csv_file_path(self.name), index=True)
@@ -26,13 +25,10 @@ class BaseTropesCRUD:
         raise NotImplementedError
 
 
-
-
 class TropeExamplesCRUD(BaseTropesCRUD):
     def get_trope_examples_for_title_id(self, title_id: str) -> list[TropeExample]:
         """Returns a list of TropeExamples for a given title_id."""
         filtered_df = self.df[self.df["title_id"] == title_id]
-        filtered_df['name'] = self.name
         return TypeAdapter(list[TropeExample]).validate_python(filtered_df.to_dict(orient="records"))
 
     def get_titles_for_title_ids(self, title_ids: list[str]) -> list[str]:
@@ -49,9 +45,9 @@ class TropeExamplesCRUD(BaseTropesCRUD):
         filtered_df = self.df[~self.df["title_id"].isin(exclude_ids)]
         filtered_df = filtered_df.dropna(subset=["Example", "Title", "trope_id", "title_id"])
         filtered_df = filtered_df[offset:offset + limit]
-        filtered_df['name'] = self.name
         for i in range(0, len(filtered_df), batch_size):
             yield TypeAdapter(list[TropeExample]).validate_python(filtered_df[i:i + batch_size].to_dict(orient="records"))
+
 
 
 

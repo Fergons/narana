@@ -4,7 +4,7 @@ from pydantic import (
     HttpUrl,
     ConfigDict
 )
-from typing import Literal, Annotated
+from typing import Literal
 
 TROPE_EXAMPLES_TABLES = Literal[
     "lit_goodreads_match",
@@ -45,13 +45,19 @@ class LibgenSearchResult(BaseModel):
     hits: list[LibgenHit]
 
 
-class LitTrope(BaseModel):
-    name: Literal["lit_tropes"]
+class TropeExample(BaseModel):
     title: str = Field(..., alias="Title")
     trope: str = Field(..., alias="Trope")
     example: str = Field(..., alias="Example")
     trope_id: str
     title_id: str
+    
+    # Lit goodreads match
+    clean_title: str | None = Field(default=None, alias="CleanTitle")
+    author: str | None = Field(default=None)
+
+    # IMDB match
+    tconst: str | None = Field(default=None)
 
     model_config = ConfigDict(extra='ignore')
 
@@ -64,12 +70,6 @@ thehitchhikersguidetot...	Douglas Adams	male	            lit11735	t16621
 """
 
 
-class LitGoodreadsMatch(LitTrope):
-    name: Literal["lit_goodreads_match"]
-    clean_title: str = Field(..., alias="CleanTitle")
-    author: str
-    verified_gender: str
-    
 
 
 """
@@ -86,4 +86,6 @@ class Trope(BaseModel):
     model_config = ConfigDict(extra='ignore')
 
 
-TropeExample = Annotated[LitTrope | LitGoodreadsMatch, Field(discriminator="name")]
+
+class EmbedTropeExample(TropeExample):
+    dense_rep: list[float]

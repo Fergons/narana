@@ -2,7 +2,7 @@ from bs4 import BeautifulSoup
 import httpx
 import asyncio
 from app.models.tvtropes import LibgenSearchResult, Title
-from app.crud import goodreadsTropesCRUD
+from app.crud.tvtropes import TropeExamplesCRUD
 from app.utils import retry_fetch
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
@@ -178,6 +178,8 @@ async def main():
     ]
     for title in scraped_titles:
         exclude_ids.add(title["title_id"])
+    
+    goodreadsTropesCRUD = TropeExamplesCRUD.load_from_csv('lit_goodreads_match')
     titles = goodreadsTropesCRUD.get_titles(
         limit=10000000, exclude_ids=list(exclude_ids)
     )

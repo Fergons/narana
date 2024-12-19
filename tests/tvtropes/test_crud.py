@@ -1,4 +1,5 @@
-from app.crud import TropeExamplesCRUD
+from app.crud.tvtropes import TropeExamplesCRUD
+from app.models.tvtropes import TropeExample
 import pytest
 import pandas as pd
 
@@ -14,7 +15,7 @@ def goodreads_CRUD():
         'trope_id': 't27289',
         'CleanTitle': 'abadcaseofstripes'
     }], columns=['Title', 'title_id', 'author', 'verified_gender', 'Example', 'Trope', 'trope_id', 'CleanTitle'])
-    return TropeExamplesCRUD(df=df, name='lit_goodreads_match')
+    return TropeExamplesCRUD(df=df, name='lit_goodreads')
 
 
 @pytest.fixture
@@ -33,8 +34,8 @@ def lit_CRUD():
 
 def test_load_from_csv():
     crud = TropeExamplesCRUD.load_from_csv('lit_tropes')
-    assert crud.name == 'lit_tropes'
     assert isinstance(crud.df, pd.DataFrame)
+    assert crud.name == 'lit_tropes'
 
 def test_get_trope_examples_for_title_id(lit_CRUD):
     crud = lit_CRUD
