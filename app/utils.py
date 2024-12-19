@@ -22,6 +22,11 @@ async def async_load_jsonl(path: str) -> AsyncIterable[dict]:
         async for line in f:
            yield orjson.loads(line)
 
+def load_jsonl(path: str) -> list:
+    with open(path, mode='r') as f:
+        return [orjson.loads(line) for line in f]
+        
+
 async def async_dump_jsonl(path: str, data: Iterable[dict]):
     async with await open_file(path, mode='w') as f:
         for item in data:

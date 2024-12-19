@@ -1,7 +1,7 @@
 from abc import abstractmethod
 import pandas as pd
 from dataclasses import dataclass
-from app.config import dataset_config
+from app.config import tvtropes_config
 from app.models.tvtropes import TropeExample, TROPE_EXAMPLES_TABLES, TROPES_TABLE, Trope, Title, TropeExample
 from pydantic import TypeAdapter
 from typing import Generator, Generic, TypeVar
@@ -14,11 +14,11 @@ class BaseTropesCRUD:
 
     @classmethod
     def load_from_csv(cls, name: TROPE_EXAMPLES_TABLES | TROPES_TABLE):
-        df = pd.read_csv(dataset_config.get_csv_file_path(name))
+        df = pd.read_csv(tvtropes_config.get_csv_file_path(name))
         return cls(df=df, name=name)
 
     def save_to_csv(self):
-        self.df.to_csv(dataset_config.get_csv_file_path(self.name), index=True)
+        self.df.to_csv(tvtropes_config.get_csv_file_path(self.name), index=True)
 
     @abstractmethod
     def batch_generator(self, batch_size: int, limit: int, offset: int, exclude_ids: list[str]) -> Generator[list,None, None]:

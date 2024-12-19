@@ -5,7 +5,7 @@ from pydantic import (BaseModel, Field,
                       DirectoryPath, FilePath, HttpUrl,
                       field_validator, model_validator)
 from dotenv import dotenv_values
-
+from dataclasses import dataclass
 
 class TVTropesConfig(BaseModel):
     """
@@ -81,6 +81,13 @@ class TVTropesConfig(BaseModel):
 
     def get_csv_file_path(self, dataset_name: str) -> FilePath:
         return self.csv_dir / self.csv_map[dataset_name]
+    
+
+@dataclass
+class BooksConfig:
+    dir: DirectoryPath
+
 
 env = dotenv_values(".env") 
-dataset_config = TVTropesConfig.load_config_yaml(f"{env.get('DATA_FOLDER', './data')}/tvtropes")
+tvtropes_config = TVTropesConfig.load_config_yaml(f"{env.get('DATA_FOLDER', './data')}/tvtropes")
+books_config = BooksConfig(dir=Path(f"{env.get('DATA_FOLDER', './data')}/books"))

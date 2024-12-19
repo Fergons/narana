@@ -11,13 +11,17 @@ import re
 from utils.string import camel_to_string
 
 import orjson
-from app.config import dataset_config
+from app.config import tvtropes_config, books_config
 import logging
 
-from app.utils import async_load_jsonl
+from app.utils import load_jsonl, async_load_jsonl
 from tqdm import tqdm
 
+from pydantic import TypeAdapter
+
 from dotenv import dotenv_values
+
+import argparse
 
 
 basic_config = logging.basicConfig(level=logging.INFO)
@@ -146,7 +150,7 @@ async def save_search_results(
 async def search_and_store_titles_from_libgen(
     session: httpx.AsyncClient, titles: list[Title]
 ):
-    csv_path = dataset_config.csv_dir / "libgen.jsonl"
+    csv_path = tvtropes_config.csv_dir / "libgen.jsonl"
     send_stream, receive_stream = anyio.create_memory_object_stream[dict]()
     async with await FileWriteStream.from_path(csv_path, append=True) as fstream:
         try:
@@ -170,11 +174,14 @@ async def search_and_store_titles_from_libgen(
             logger.error(e)
 
 
-async def main():
+async def get_tvtropes_titles_from_libgen():
     exclude_ids = set()
+    scraped_path = tvtropes_config.csv_dir / "libgen.jsonl"
+    if not scraped_path.exists():
+        scraped_path.touch()
     scraped_titles = [
         title
-        async for title in async_load_jsonl(dataset_config.csv_dir / "libgen.jsonl")
+        async for title in async_load_jsonl(tvtropes_config.csv_dir / "libgen.jsonl")
     ]
     for title in scraped_titles:
         exclude_ids.add(title["title_id"])
@@ -204,5 +211,87 @@ async def main():
                 await search_and_store_titles_from_libgen(session, batch)
 
 
+def download_books_scraped(scraped_list_path, limit: 1000, offset: 0):
+    with open(scraped_list_path, "r") as f:
+        scraped_books = [orjson.loads(line) for line in f]
+
+    downloaded_books = books_config.dir.glob("*.epub")
+    downloaded_books = [book.stem for book in downloaded_books]
+
+    scraped_books = TypeAdapter(list[LibgenSearchResult]).validate_python(scraped_books)
+    scraped_books = [book for book in scraped_books if len(book.hits) > 0 and book.title_id not in downloaded_books]
+
+
+    for book in scraped_books[offset: offset + limit]:
+        for hit in book.hits:
+            saved = False
+            for link in hit.download_urls:
+                try:
+                    response = httpx.get(str(link))
+                    response.raise_for_status()
+                except httpx.HTTPStatusError:
+                    continue
+                else:
+                    direct_download_link = extract_download_link(response.content)
+                    if direct_download_link:
+                        try: 
+                            response = httpx.get(direct_download_link)
+                            
+                            with open(
+                                books_config.dir / f"{book.title_id}.epub", "wb"
+                            ) as f:
+                                f.write(response.content)
+                            saved = True
+                        except httpx.HTTPError:
+                            continue
+                        else:
+                            break
+                  
+            if saved:
+                break
+                    
+         
+    
+            
 if __name__ == "__main__":
-    anyio.run(main)
+    # parse program arguments and run
+    parser = argparse.ArgumentParser(description="Download books from Libgen")
+    parser.add_argument(
+        "--download",
+        action="store_true",
+        help="Download books",
+    )
+
+    parser.add_argument(
+        "--scrape",
+        action="store_true",
+        help="Scrape books",
+    )
+
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=10000,
+        help="Number of books to download",
+    )
+    parser.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        help="Offset to start downloading from",
+    )
+    parser.add_argument(
+        "--scraped_list_path",
+        type=str,
+        default=tvtropes_config.csv_dir / "libgen.jsonl",
+        help="Path to scraped list of books",
+    )
+
+    args = parser.parse_args()
+    if args.scrape:
+        anyio.run(get_tvtropes_titles_from_libgen)
+    if args.download:
+        download_books_scraped(args.scraped_list_path, args.limit, args.offset)
+
+            
+
