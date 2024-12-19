@@ -35,7 +35,7 @@ class Title(BaseModel):
 class LibgenHit(BaseModel):
     authors: list[str]
     title: str
-    download_url: list[HttpUrl]
+    download_urls: list[HttpUrl]
     format: Literal["epub", "pdf", "txt"]
     language: str
 
