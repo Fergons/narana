@@ -1,6 +1,4 @@
-
-import ebooklib
-from ebooklib import epub
+from ebooklib import epub, ITEM_DOCUMENT
 from bs4 import BeautifulSoup
 import os
 import tqdm
@@ -16,15 +14,20 @@ def epub_to_txt(epub_path, txt_output_path):
     full_text = []
 
     for item in book.get_items():
-        if item.get_type() == ebooklib.ITEM_DOCUMENT:
+        if item.get_type() == ITEM_DOCUMENT:
             # Parse the content with BeautifulSoup
             soup = BeautifulSoup(item.get_content(), 'html.parser')
-            # Extract and append the text
-            text = soup.get_text()
-            #match two or more consecutive newlines and replace with a single newline
-            text = text.strip()
-            if not text:
-                continue
+            soup.prettify(formatter=None)
+            spans = soup.find_all('span')
+            for span in spans:
+                span.replace_with(span.text)
+
+            # find all paragraphs
+            # extract text from paragraphs
+            para_texts = [soup.get_text(strip=True, separator=' ')]
+            para_texts = [p.strip() for p in para_texts if p.strip()]
+            text = '\n'.join(para_texts)
+            
             clean_text = re.sub(r'\n{2,}', '\n', text)
             full_text.append(clean_text)
 
@@ -47,4 +50,5 @@ if __name__ == "__main__":
             epub_to_txt(epub_file, txt_output_path)
         except Exception as e:
             print(f"Failed to convert {epub_file}: {e}")
+        
 
