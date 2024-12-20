@@ -15,52 +15,26 @@ from uuid import uuid4
 
 
 class Document(BaseModel):
-    document_id: UUID4 = Field(default=uuid4)
-    parent_id: UUID4
+    document_id: str = Field(default=uuid4)
+    parent_id: str | None
     title: str | None
-    text: str
-
-class TokenizedDocument(Document):
-    model: str
-    tokens: list
-    size: int
-
+    authors: list[str] | None
+    chunks: list[str]
+    max_chunk_size: int
 
 
 class DocumentTropeMatch(BaseModel):
     """
     Titles from literature tropes that can be sourced from libgen.
     """
-    document_id: UUID4
+    document_id: str
     title_id: str
     title: str
     author: str | None
     download_url: HttpUrl
 
 
-class Embedding(BaseModel):
+class EmbeddedDocument(BaseModel):
+    document_id: str
     model: str
-    document_id: UUID4
-    embedding: list[float]
-
-
-class Book(BaseModel):
-    title_id: str = Field(..., alias="title_id")
-    title: str
-    author: str | None
-    download_url: HttpUrl
-    format: Literal["epub", "pdf", "txt"]
-
-    model_config = ConfigDict(extra='ignore')
-
-
-# class EpubBook(BaseModel):
-#     title_id: str = Field(..., alias="title_id")
-#     text: str
-#     paragraph_spans: list[tuple[int, int]]
-#     chapter_spans: dict[str, tuple[int, int]]
-#     chapter_names: dict[str, str]
-
-#     model_config = ConfigDict(extra='ignore')
-
-
+    chunk_embeddings: list[float]

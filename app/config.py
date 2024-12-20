@@ -1,11 +1,18 @@
 from pathlib import Path
 import yaml
 from typing import Self, Any
-from pydantic import (BaseModel, Field,
-                      DirectoryPath, FilePath, HttpUrl,
-                      field_validator, model_validator)
+from pydantic import (
+    BaseModel,
+    Field,
+    DirectoryPath,
+    FilePath,
+    HttpUrl,
+    field_validator,
+    model_validator,
+)
 from dotenv import dotenv_values
 from dataclasses import dataclass
+
 
 class TVTropesConfig(BaseModel):
     """
@@ -18,11 +25,12 @@ class TVTropesConfig(BaseModel):
         doc_zip_path (FilePath | None): The path to the zip file containing the raw document text files.
         csv_zip_path (FilePath | None): The path to the zip file containing the CSV files.
     """
+
     dataset_dir: DirectoryPath = Field(default=Path("./tvtropes"))
     csv_dir: DirectoryPath | None = None
     documents_dir: DirectoryPath | None = None
     download_url: HttpUrl | None = None
-    doc_zip_path: FilePath | None= None
+    doc_zip_path: FilePath | None = None
     csv_zip_path: FilePath | None = None
     csv_map: dict[str, str] = {
         "film_imdb_match": "film_imdb_match.csv",
@@ -42,7 +50,7 @@ class TVTropesConfig(BaseModel):
         if self.documents_dir is None:
             self.documents_dir = self.dataset_dir / "docs"
         return self
-    
+
     @field_validator("doc_zip_path", "csv_zip_path")
     @classmethod
     def validate_zip_paths(cls, value: Any):
@@ -62,12 +70,12 @@ class TVTropesConfig(BaseModel):
         config_path = Path(dataset_dir) / "config.yaml"
         if not config_path.is_file():
             raise FileNotFoundError(f"Configuration file not found at {config_path}")
-        
-        with config_path.open('r') as f:
+
+        with config_path.open("r") as f:
             config_data = yaml.safe_load(f)
 
         return cls(**config_data.get("tvtropes", {}))
-    
+
     def save_config_yaml(self, config_path: str | Path = None):
         """
         Save the configuration to the specified config.yaml file.
@@ -76,18 +84,31 @@ class TVTropesConfig(BaseModel):
         """
         if config_path is None:
             config_path = self.dataset_dir / "config.yaml"
-        with config_path.open('w') as f:
+        with config_path.open("w") as f:
             yaml.dump({"tvtropes": self.model_dump()}, f)
 
     def get_csv_file_path(self, dataset_name: str) -> FilePath:
         return self.csv_dir / self.csv_map[dataset_name]
-    
+
 
 @dataclass
 class BooksConfig:
     dir: DirectoryPath
+    max_chunk_size: int = 1000 # in words
+    overlap: int = 250  # in words
 
 
-env = dotenv_values(".env") 
-tvtropes_config = TVTropesConfig.load_config_yaml(f"{env.get('DATA_FOLDER', './data')}/tvtropes")
+@dataclass
+class VespaConfig:
+    url: str
+    port: int
+
+
+env = dotenv_values(".env")
+tvtropes_config = TVTropesConfig.load_config_yaml(
+    f"{env.get('DATA_FOLDER', './data')}/tvtropes"
+)
 books_config = BooksConfig(dir=Path(f"{env.get('DATA_FOLDER', './data')}/books"))
+vespa_config = VespaConfig(
+    url=env.get("VESPA_HOST", "http://localhost"), port=int(env.get("VESPA_PORT", 8080))
+)

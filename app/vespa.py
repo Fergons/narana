@@ -1,4 +1,17 @@
-from vespa.package import (ApplicationPackage, Field, Document, Schema, FieldSet, RankProfile, Function, FirstPhaseRanking)
+from vespa.package import (
+    ApplicationPackage,
+    Field,
+    ImportedField,
+    Document,
+    Schema,
+    FieldSet,
+    RankProfile,
+    DocumentSummary,
+    SecondPhaseRanking,
+    Function,
+    FirstPhaseRanking,
+    HNSW,
+)
 from vespa.deployment import VespaDocker
 
 
@@ -7,62 +20,210 @@ app_package = ApplicationPackage(name="narana")
 # the original data from tvtropes dataset is split into multiple tables in the CSV files
 # I merged them into a single table, only difference is the name of the field Example and Description
 # for a definition of a trope and example of a trope in the story
-tvtropes_schema = Schema(
-    name="tvtropes",
+trope_example_schema = Schema(
+    name="trope_examples",
     document=Document(
         fields=[
-            Field(name="title", type="string", indexing=["attribute", "summary"], optional=True),
-            Field(name="trope", type="string", indexing=["attribute", "summary"], optional=True),
+            Field(
+                name="title",
+                type="string",
+                indexing=["summary", "attribute"],
+            ),
+            Field(
+                name="trope",
+                type="string",
+                indexing=["summary", "attribute"],
+            ),
+            Field(name="author", type="string", indexing=["attribute", "summary"]),
             Field(
                 name="example",
                 type="string",
-                indexing=["index", "summary"],
-                index="enable-bm25"
+                indexing=["summary", "index"],
+                index="enable-bm25",
             ),
-            Field(name="trope_id", type="string", indexing=["attribute", "summary"], optional=True),
-            Field(name="title_id", type="string", indexing=["attribute", "summary"], optional=True),
-            # Field(
-            #     name="lexical_rep",
-            #     type="tensor<bfloat16>(t{})",
-            #     indexing=["attribute", "summary"]
-            # ),
-            Field(
-                name="dense_rep",
-                type="tensor<bfloat16>(x[1024])",
-                indexing=["attribute", "summary"],
-                attribute=["distance-metric: angular"]
-            ),
-            # Field(
-            #     name="colbert_rep",
-            #     type="tensor<bfloat16>(t{}, x[1024])",
-            #     indexing=["attribute", "summary"]
-            # )
+            Field(name="trope_id", type="string", indexing=["attribute", "summary"]),
+            Field(name="title_id", type="string", indexing=["attribute", "summary"]),
         ]
     ),
     fieldsets=[
+        # this data will be mainly retrieved based on trope information
         FieldSet(name="default", fields=["trope", "example"]),
-    ]
+    ],
+    rank_profiles=[RankProfile(name="bm25", first_phase="bm25(example)")],
 )
 
-semantic = RankProfile(
-    name="semantic",
-    inputs=[
-        ("query(q_dense)", "tensor<bfloat16>(x[1024])")
-    ],
-    functions=[
-        Function(
-            name="dense",
-            expression="cosine_similarity(query(q_dense), attribute(dense_rep),x)",
-        )
-    ],
-    first_phase=FirstPhaseRanking(
-        expression="dense", rank_score_drop_limit=0.0
+
+trope_example_embedding_schema = Schema(
+    name="trope_example_embeddings",
+    inherits="trope_examples",
+    document=Document(
+        inherits="trope_examples",
+        fields=[
+            Field(name="model", type="string", indexing=["attribute", "summary"]),
+            Field(name="version", type="string", indexing=["attribute", "summary"]),
+            Field(
+                name="dense_rep",
+                type="tensor<bfloat16>(x[1024])",
+                indexing=["attribute", "index"],
+                ann=HNSW(distance_metric="angular"),
+            ),
+            Field(
+                name="colbert_rep",
+                type="tensor<bfloat16>(token{}, x[1024])",
+                indexing=["attribute", "index"],
+                ann=HNSW(distance_metric="angular"),
+            ),
+        ],
     ),
-    match_features=["dense", "bm25(example)"],
+    rank_profiles=[
+        RankProfile(
+            name="dense",
+            first_phase=FirstPhaseRanking(
+                expression="closeness(dense_rep)",
+                rank_score_drop_limit=0.3,
+            ),
+        ),
+        RankProfile(
+            name="colbert",
+            inputs=[("query(q_colbert)", "tensor<bfloat16>(qt{}, x[1024])")],
+            functions=[
+                Function(
+                    name="max_sim",
+                    expression="sum(reduce(sum(query(q_colbert) * attribute(colbert_rep), x), max, token), qt) / query(q_len_colbert)",
+                ),
+            ],
+            first_phase=FirstPhaseRanking(
+                expression="max_sim",
+                rank_score_drop_limit=0.3,
+            ),
+        ),
+    ],
 )
-tvtropes_schema.add_rank_profile(semantic)
 
-app_package.add_schema(tvtropes_schema)
+
+document_schema = Schema(
+    name="documents",
+    global_document=True,
+    document=Document(
+        fields=[
+            Field(name="document_id", type="string", indexing=["attribute", "summary"]),
+            Field(name="parent_id", type="string", indexing=["attribute", "summary"]),
+            Field(name="title", type="string", indexing=["summary", "attribute"]),
+            Field(
+                name="authors", type="array<string>", indexing=["summary", "attribute"]
+            ),
+            Field(
+                name="chunks",
+                type="array<string>",
+                indexing=["summary", "index"],
+                bolding=True,
+                index="enable-bm25",
+            ),
+            Field(name="max_chunk_size", type="int", indexing=["attribute", "summary"]),
+        ]
+    ),
+    fieldsets=[
+        FieldSet(name="default", fields=["title", "chunks", "authors"]),
+    ],
+    rank_profiles=[RankProfile(name="bm25", first_phase="bm25(chunks)")],
+)
+
+
+doc_embedding_schema = Schema(
+    name="document_embeddings",
+    inherits="documents",
+    document=Document(
+        inherits="documents",
+        fields=[
+            Field(name="model", type="string", indexing=["attribute", "summary"]),
+            # version is a literal with values dense, colbert or hybrid
+            Field(name="version", type="string", indexing=["attribute", "summary"]),
+            Field(
+                name="dense_rep",
+                type="tensor<bfloat16>(chunk{},x[1024])",
+                indexing=["index", "attribute"],
+                ann=HNSW(distance_metric="angular"),
+            ),
+            Field(
+                name="colbert_rep",
+                type="tensor<bfloat16>(chunk{},token{},x[1024])",
+                indexing=["index", "attribute"],
+            ),
+            Field(name="document_id", type="string", indexing=["attribute", "summary"]),
+        ],
+    ),
+    fieldsets=[FieldSet(name="default", fields=["chunks", "title", "authors"])],
+    rank_profiles=[
+        RankProfile(
+            name="dense",
+            # inputs=[("query(q)", "tensor<bfloat16>(x[1024])")],
+            inherits="default",
+            first_phase="closeness(dense_rep)",
+            match_features=["closeness(dense_rep)"],
+        ),
+        RankProfile(
+            name="colbert",
+            inputs=[
+                ("query(q_colbert)", "tensor<bfloat16>(qt{}, x[1024])"),
+                ("query(q_len_colbert)", "float"),
+            ],
+            functions=[
+                Function(
+                    name="max_sim",
+                    expression="sum(reduce(sum(query(q_colbert) * attribute(colbert_rep), x), max, token), qt, chunk) / query(q_len_colbert)",
+                ),
+            ],
+            first_phase=FirstPhaseRanking(
+                expression="max_sim",
+                rank_score_drop_limit=0.0,
+            ),
+        ),
+        RankProfile(
+            name="hybrid",
+            inputs=[
+                ("query(q_dense)", "tensor<bfloat16>(x[1024])"),
+                ("query(q_colbert)", "tensor<bfloat16>(qt{}, x[1024])"),
+                ("query(q_len_colbert)", "float"),
+            ],
+            functions=[
+                Function(
+                    name="max_dense",
+                    expression="reduce(cosine_similarity(query(q_dense), attribute(dense_rep), x), max, chunk)",
+                ),
+                Function(
+                    name="avg_dense",
+                    expression="reduce(cosine_similarity(query(q_dense), attribute(dense_rep), x), avg, chunk)",
+                ),
+                # max_sim to handle an extra dimension chunk{} and token{}
+                # - sum over x dimension: sum(query(q_colbert)*attribute(colbert_rep), x)
+                #   This leaves dimensions qt{}, chunk{}, token{}.
+                # - reduce with max over token dimension: reduce(..., max, token)
+                #   This now leaves qt{}, chunk{}. (qt values are sim. scores with max sim tokens from each cunk)
+                # - sum over qt and normalize by len of query (q_len_colbert)
+                # - finally divide return max over chunks
+                Function(
+                    name="max_sim",
+                    expression="reduce(sum(reduce(sum(query(q_colbert) * attribute(colbert_rep), x), max, token), qt) / query(q_len_colbert), max, chunk)"
+                ),
+            ],
+            first_phase=FirstPhaseRanking(
+                expression="avg_dense",
+                rank_score_drop_limit=0.0,
+            ),
+            second_phase=SecondPhaseRanking(
+                expression="max_sim",
+                rerank_count=100,
+            ),
+            match_features=["avg_dense", "max_dense", "max_sim"],
+        ),
+    ],
+)
+
+
+app_package.add_schema(trope_example_schema)
+app_package.add_schema(trope_example_embedding_schema)
+app_package.add_schema(document_schema)
+app_package.add_schema(doc_embedding_schema)
+
 vespa_docker = VespaDocker()
-app = vespa_docker.deploy(application_package = app_package)
-
+app = vespa_docker.deploy(application_package=app_package)

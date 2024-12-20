@@ -18,14 +18,13 @@ def epub_to_txt(epub_path, txt_output_path):
             # Parse the content with BeautifulSoup
             soup = BeautifulSoup(item.get_content(), 'html.parser')
             soup.prettify(formatter=None)
-            spans = soup.find_all('span')
+            print(soup)
+            exclude_tags = {'div', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'}
+            spans = soup.find_all(lambda tag: tag.name not in exclude_tags if tag.name else False)
             for span in spans:
-                span.replace_with(span.text)
-
-            # find all paragraphs
-            # extract text from paragraphs
-            para_texts = [soup.get_text(strip=True, separator=' ')]
-            para_texts = [p.strip() for p in para_texts if p.strip()]
+                span.unwrap()
+            soup = BeautifulSoup(str(soup), 'html.parser')
+            para_texts = [soup.get_text(strip=True, separator='\n')]
             text = '\n'.join(para_texts)
             
             clean_text = re.sub(r'\n{2,}', '\n', text)
@@ -44,11 +43,18 @@ def epub_to_txt(epub_path, txt_output_path):
 if __name__ == "__main__":
     
     epubs_dir = Path(BookCompanion.DATASET_PATH)
-    for epub_file in tqdm.tqdm(epubs_dir.glob("*.epub")):
-        txt_output_path = epub_file.with_suffix(".txt")
-        try:
-            epub_to_txt(epub_file, txt_output_path)
-        except Exception as e:
-            print(f"Failed to convert {epub_file}: {e}")
+
+    # for epub_file in tqdm.tqdm(epubs_dir.glob("*.epub")):
+    #     txt_output_path = epub_file.with_suffix(".txt")
+    #     try:
+    #         epub_to_txt(epub_file, txt_output_path)
+    #     except Exception as e:
+    #         print(f"Failed to convert {epub_file}: {e}")
         
 
+    epub_file = epubs_dir / "450 From Paddington.epub"
+    txt_output_path = epub_file.with_suffix(".txt")
+    try:
+        epub_to_txt(epub_file, txt_output_path)
+    except Exception as e:
+        print(f"Failed to convert {epub_file}: {e}")

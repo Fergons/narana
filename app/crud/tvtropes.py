@@ -2,6 +2,7 @@ from abc import abstractmethod
 import pandas as pd
 from dataclasses import dataclass
 from app.config import tvtropes_config
+from app.models.documents import Document
 from app.models.tvtropes import TropeExample, TROPE_EXAMPLES_TABLES, TROPES_TABLE, Trope, Title, TropeExample
 from pydantic import TypeAdapter
 from typing import Generator, Generic, TypeVar
@@ -26,10 +27,17 @@ class BaseTropesCRUD:
 
 
 class TropeExamplesCRUD(BaseTropesCRUD):
-    def get_trope_examples_for_title_id(self, title_id: str) -> list[TropeExample]:
+    def get_trope_examples_for_title_id(self, title_id: list[str]) -> list[TropeExample]:
         """Returns a list of TropeExamples for a given title_id."""
         filtered_df = self.df[self.df["title_id"] == title_id]
         return TypeAdapter(list[TropeExample]).validate_python(filtered_df.to_dict(orient="records"))
+
+    def get_title_info_for_title_ids(self, title_ids: list[str]) -> dict[str, Title]:
+        filtered_df = self.df.drop_duplicates(subset=['title_id'])
+        filtered_df = filtered_df[filtered_df["title_id"].isin(title_ids)]
+        return TypeAdapter(dict[str, Title]).validate_python({record["title_id"]: record for record in filtered_df.to_dict(orient="records")})
+
+
 
     def get_titles_for_title_ids(self, title_ids: list[str]) -> list[str]:
         return self.df[self.df["title_id"].isin(title_ids)]["Title"].unique().tolist()
@@ -47,7 +55,15 @@ class TropeExamplesCRUD(BaseTropesCRUD):
         filtered_df = filtered_df[offset:offset + limit]
         for i in range(0, len(filtered_df), batch_size):
             yield TypeAdapter(list[TropeExample]).validate_python(filtered_df[i:i + batch_size].to_dict(orient="records"))
-
+    
+    def add_info_to_documents(self, documents: list[Document]) -> list[Document]:
+        title_ids = [document.parent_id for document in documents]
+        title_map = self.get_title_info_for_title_ids(title_ids)
+        for document in documents:
+            if document.parent_id in title_map:
+                document.title = title_map[document.parent_id].title
+                document.authors = [title_map[document.parent_id].author]
+        return documents
 
 
 

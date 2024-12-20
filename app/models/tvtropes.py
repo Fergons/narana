@@ -87,5 +87,6 @@ class Trope(BaseModel):
 
 
 
-class EmbedTropeExample(TropeExample):
+class EmbedTropeExample(BaseModel):
+    id: str
     dense_rep: list[float]
