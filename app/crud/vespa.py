@@ -1,125 +1,228 @@
-import asyncio
-from vespa.application import Vespa, VespaAsync, VespaQueryResponse
-from vespa.exceptions import VespaError
-from utils.string import camel_to_string
-from app.models.tvtropes import TropeExample, EmbedTropeExample
-from app.models.documents import Document
-from typing import Sequence, Literal
-from dataclasses import dataclass, asdict
-from app.config import vespa_config
 import logging
+from dataclasses import dataclass, asdict, field
+from typing import List, Callable, Dict, Tuple, Generator
+from vespa.application import Vespa, VespaResponse
+from app.models.tvtropes import TropeExample
+from app.models.embeddings import Embedding
+from app.models.documents import Document
+from utils.string import camel_to_string
 
-
-basic_config = logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class VespaParams:
-    max_connections: int | None = None
-    max_workers: int | None = None
-    max_queue_size: int | None = None
-    num_concurrent_requests: int | None = None
+class ConcurrencyParams:
+    """
+    Encapsulate default feeding parameters for feed_iterable.
+    (These get passed as **kwargs to app.feed_iterable(...))
+    """
+
+    max_connections: int = 10
+    max_workers: int = 10
+    max_queue_size: int = 1000
 
 
-def feed_callback(response: VespaQueryResponse, id: str):
+def default_feed_callback(response: VespaResponse, doc_id: str):
+    """
+    Default callback if feed fails or succeeds. Overwrite as needed.
+    """
     if not response.is_successful():
-        logger.error(f"Feed failed for document {id}: {response.get_json()}")
+        logger.error(f"Feed failed for document {doc_id}: {response.get_json()}")
 
 
 @dataclass
-class VespaCRUD:
+class BaseVespaCRUD:
+    """
+    A base CRUD that defines common feed/visit logic. Subclasses can override
+    schema_name, namespace, content_cluster_name or provide them in methods.
+    """
+
     app: Vespa
-    feedParams: VespaParams
+    namespace: str
+    content_cluster_name: str
+    schema_name: str
+    feed_params: ConcurrencyParams = field(default_factory=ConcurrencyParams)
+    feed_callback: Callable[[VespaResponse, str], None] = default_feed_callback
 
-    def feed_trope_examples(self, batch: list[TropeExample], **kwargs):
+    def feed_iterable(
+        self,
+        docs: List[Dict],
+        operation_type: str = "feed",
+        auto_assign: bool = True,
+        **kwargs,
+    ):
+        """
+        Generic feed operation for a batch of documents (dicts).
+        - docs must be a list of dicts, each with "id" and "fields".
+        - operation_type is one of "feed", "update", or "delete".
+        - auto_assign indicates if we do partial updates automatically or not.
+
+        We pass down feedParams as **asdict(self.feed_params).
+        """
+        all_params = asdict(self.feed_params)
+        all_params.update(kwargs)
         self.app.feed_iterable(
-            iter=[prepare_tvtrope_example(example) for example in batch],
-            schema="trope_example_embeddings",
-            namespace="narana",
-            callback=feed_callback,
-            **kwargs,
-            # **asdict(self.feedParams),
+            iter=docs,
+            schema=self.schema_name,
+            namespace=self.namespace,
+            operation_type=operation_type,
+            callback=self.feed_callback,
+            auto_assign=auto_assign,
+            **all_params,
         )
 
-    def feed_documents(self, batch: list[Document], **kwargs):
-        self.app.feed_iterable(
-            iter=[prepare_document(example) for example in batch],
-            schema="document_embeddings",
-            namespace="narana",
-            callback=feed_callback,
+    def visit_all(
+        self,
+        selection: str = "true",
+        slices: int = 1,
+        wanted_document_count: int = 100,
+        **kwargs,
+    ):
+        """
+        Generic visit operation over all documents in this schema & namespace.
+        Yields slices; each slice is a generator of VespaResponse.
+
+        Example usage:
+            for slice_res in self.visit_all(selection="my_field contains 'foo'"):
+                for resp in slice_res:
+                    ...
+        """
+        return self.app.visit(
+            content_cluster_name=self.content_cluster_name,
+            schema=self.schema_name,
+            namespace=self.namespace,
+            selection=selection,
+            slices=slices,
+            wanted_document_count=wanted_document_count,
             **kwargs,
-            # **asdict(self.feedParams),
         )
 
-    def feed_embeddings(self, batch: list):
-        self.app.feed_iterable()
 
-    def get_tvtropes_ids(self):
-        all_ids = []
-        for slice in self.app.visit(
-            schema="trope_example_embeddings",
-            namespace="narana",
-            selection="true",  # Document selection - see https://docs.vespa.ai/en/reference/document-select-language.html
-            slices=4,
-            wanted_document_count=500,
+@dataclass
+class VespaTropesCRUD(BaseVespaCRUD):
+    """
+    Operations specific to the 'trope_example_embeddings' schema.
+    Inherits generic feed/visit from BaseVespaCRUD.
+    """
+
+    schema_name: str = "trope_example_embeddings"
+
+    def feed(self, examples: List[TropeExample], **kwargs):
+        """
+        Create or update (operation_type='feed') documents in the trope_example_embeddings schema.
+        """
+        docs = [prepare_tvtrope_example(ex) for ex in examples]
+        self.feed_iterable(docs, operation_type="feed", **kwargs)
+
+    def update_embeddings(self, embeddings: List[Embedding], **kwargs):
+        """
+        Partial update for embeddings.
+        auto_assign=False ensures we keep the 'add' operations.
+        """
+        update_docs = prepare_update_tvtrope_examples_embeddings(embeddings)
+        self.feed_iterable(
+            update_docs, operation_type="update", auto_assign=False, **kwargs
+        )
+
+    def get_all_ids(self) -> List[Tuple[str, str]]:
+        """
+        Returns a list of (title_id, trope_id) from all docs in this schema.
+        """
+        result = []
+        for slice_res in self.visit_all(
+            selection="true", slices=4, wanted_document_count=500
         ):
-            for response in slice:
-                if response.is_successful():
-                    all_ids.extend(
-                        [
-                            (doc["fields"]["title_id"], doc["fields"]["trope_id"])
-                            for doc in response.documents
-                        ]
-                    )
-        return all_ids
-    
-    def get_documents_without_embeddings(self) -> Document:
-        for slice in self.app.visit(
-            schema="document_embeddings",
-            namespace="narana",
-            selection="true",  # Document selection - see https://docs.vespa.ai/en/reference/document-select-language.html
-            slices=4,
-            wanted_document_count=500,
-        ):
-            for response in slice:
-                if response.is_successful():
-                    return [
-                        Document(
-                            document_id=doc["fields"]["document_id"],
-                            parent_id=doc["fields"]["parent_id"],
-                            title=doc["fields"]["title"],
-                            authors=doc["fields"]["authors"],
-                            chunks=doc["fields"]["chunks"],
-                            max_chunk_size=doc["fields"]["max_chunk_size"],
-                        )
-                        for doc in response.documents if doc.get("fields", {}).get("dense_rep") is None
-                    ]
+            for vespa_response in slice_res:
+                if vespa_response.is_successful():
+                    for doc in vespa_response.documents:
+                        fields = doc["fields"]
+                        result.append((fields["title_id"], fields["trope_id"]))
+        return result
 
-
-    def get_tvtopes_examples(self):
+    def get_all(self) -> List[TropeExample]:
+        """
+        Retrieve all TropeExamples from this schema as domain objects.
+        """
         all_examples = []
-        for slice in self.app.visit(
-            schema="trope_example_embeddings",
-            namespace="narana",
-            selection="true",  # Document selection - see https://docs.vespa.ai/en/reference/document-select-language.html
-            slices=4,
-            wanted_document_count=500,
+        for slice_res in self.visit_all(
+            selection="true", slices=4, wanted_document_count=500
         ):
-            for response in slice:
-                if response.is_successful():
-                    all_examples.extend(
-                        [
+            for vespa_response in slice_res:
+                if vespa_response.is_successful():
+                    for doc in vespa_response.documents:
+                        f = doc["fields"]
+                        all_examples.append(
                             TropeExample(
-                                title=doc["fields"]["title"],
-                                trope=doc["fields"]["trope"],
-                                title_id=doc["fields"]["title_id"],
-                                trope_id=doc["fields"]["trope_id"],
-                                example=doc["fields"]["example"],
+                                title=f["title"],
+                                trope=f["trope"],
+                                title_id=f["title_id"],
+                                trope_id=f["trope_id"],
+                                example=f["example"],
                             )
-                            for doc in response.documents
-                        ]
-                    )
+                        )
+        return all_examples
+
+    def yield_without_embeddings(self) -> Generator[TropeExample, None, None]:
+        """
+        Example: visit the schema to find documents missing a certain field.
+        Return them as domain objects.
+        """
+        selection = f"{self.schema_name}.model == null"  # or any doc selection logic
+        slices = 1
+        wanted_count = 100
+        for slice_res in self.visit_all(
+            selection=selection,
+            slices=slices,
+            wanted_document_count=wanted_count,
+        ):
+            for vespa_response in slice_res:
+                if vespa_response.is_successful():
+                    for doc in vespa_response.documents:
+                        yield TropeExample.model_validate(doc["fields"])
+
+
+@dataclass
+class VespaDocumentsCRUD(BaseVespaCRUD):
+    """
+    Operations specific to 'document_embeddings' schema.
+    """
+
+    schema_name: str = "document_embeddings"
+
+    def feed(self, docs: List[Document], **kwargs):
+        """
+        Create new documents in Vespa or update them fully (operation_type='feed').
+        """
+        doc_dicts = [prepare_document(d) for d in docs]
+        self.feed_iterable(doc_dicts, operation_type="feed", **kwargs)
+
+    def update_embeddings(self, embeddings: List[Embedding], **kwargs):
+        """
+        Partial update for embeddings.
+        auto_assign=False ensures we keep the 'add' operations.
+        """
+        update_docs = prepare_partial_update_doc_embeddings(embeddings)
+        self.feed_iterable(
+            update_docs, operation_type="update", auto_assign=False, **kwargs
+        )
+    
+    def yield_without_embeddings(self) -> Generator[Document, None, None]:
+        """
+        Example: visit the schema to find documents missing a certain field.
+        Return them as domain objects.
+        """
+        selection = f"{self.schema_name}.model == null"  # or any doc selection logic
+        slices = 1
+        wanted_count = 100
+        for slice_res in self.visit_all(
+            selection=selection,
+            slices=slices,
+            wanted_document_count=wanted_count,
+        ):
+            for vespa_response in slice_res:
+                if vespa_response.is_successful():
+                    for doc in vespa_response.documents:
+                        yield Document.model_validate(doc["fields"])
 
 
 def prepare_tvtrope_example(trope_example: TropeExample) -> dict:
@@ -128,7 +231,11 @@ def prepare_tvtrope_example(trope_example: TropeExample) -> dict:
         "fields": {
             "title": camel_to_string(trope_example.title),
             "trope": camel_to_string(trope_example.trope),
-            "example": f"Trope {camel_to_string(trope_example.trope)} can be found in {camel_to_string(trope_example.title)} as {trope_example.example}",
+            "example": 
+                f"Trope {camel_to_string(trope_example.trope)} " \
+                f"can be found in {camel_to_string(trope_example.title)} " \
+                f"as {trope_example.example}",
+        
             "title_id": trope_example.title_id,
             "trope_id": trope_example.trope_id,
         },
@@ -149,9 +256,83 @@ def prepare_document(doc: Document) -> dict:
     }
 
 
+def prepare_partial_update_doc_embeddings(embeddings: list[Embedding]) -> list[dict]:
+    return [
+        {
+            "id": e.document_id,
+            "fields": {
+                "model": {
+                    "assign": e.model,
+                },
+                "version": {"assign": e.version},
+                "dense_rep": {
+                    "add": {
+                        "blocks": [
+                            {
+                                "address": {
+                                    "chunk": e.document_chunk_index,
+                                },
+                                "values": e.dense.tolist(),
+                            },
+                        ],
+                    },
+                },
+                "colbert_rep": {
+                    "add": {
+                        "blocks": [
+                            {
+                                "address": {
+                                    "chunk": e.document_chunk_index,
+                                    "token": i,
+                                },
+                                "values": e.colbert[i].tolist(),
+                            }
+                            for i in range(e.colbert.shape[0])
+                        ],
+                    },
+                },
+            },
+        }
+        for e in embeddings
+    ]
+
+
+def prepare_update_tvtrope_examples_embeddings(
+    embeddings: list[Embedding],
+) -> list[dict]:
+    return [
+        {
+            "id": e.document_id,
+            "fields": {
+                "model": {"assign": e.model},
+                "version": {"assign": e.version},
+                "dense_rep": {
+                    "assign": e.dense.tolist(),
+                },
+                "colbert_rep": {
+                    "assign": {
+                        "blocks": [
+                            {
+                                "address": {
+                                    "token": i,
+                                },
+                                "values": e.colbert[i].tolist(),
+                            }
+                            for i in range(e.colbert.shape[0])
+                        ],
+                    }
+                },
+            },
+        }
+        for e in embeddings
+    ]
+
+
 if __name__ == "__main__":
-    crud = VespaCRUD(
-        app=Vespa(url=vespa_config.url, port=vespa_config.port),
-        feedParams=VespaParams(),
+    app = Vespa(url="sss", port=8080)
+    crud = VespaDocumentsCRUD(
+        app=app,
+        content_cluster_name="narana_content",
+        namespace="narana",
     )
-    print(crud.get_tvtropes_ids())
+    print(crud.schema_name)

@@ -1,69 +1,47 @@
-from utils.string import camel_to_string
 from app.models.tvtropes import TropeExample
 from app.models.documents import Document
-from app.crud.tvtropes import TropeExamplesCRUD, BaseTropesCRUD
+from app.crud.tvtropes import TropeExamplesCRUD
 from app.crud.documents import DocumentsCRUD
-from app.config import vespa_config, tvtropes_config, books_config
-from app.crud.vespa import VespaCRUD, VespaParams
-import asyncio
-from vespa.application import Vespa, VespaAsync
+from app.config import settings  
+from app.crud.vespa import VespaDocumentsCRUD, VespaTropesCRUD
+from vespa.application import Vespa
 from typing import Sequence
 import time
-from pydantic import BaseModel, ValidationError
+
 import argparse
+from itertools import islice
+import logging
+from app.models.embeddings import Embedding
 
 
-class Embedding(BaseModel):
-    model: str
-    version: str | None
-    document_id: str
-    document_chunk_index: int | None
-    colbert: list[float] | None
-    dense: list[float] | None
-    lexical: list[float] | None
-
-    def model_post_init(self, __context):
-        match (self.colbert, self.dense, self.lexical):
-            case (c, d, l) if c is not None and d is not None and l is not None:
-                self.version = "dense+colbert+lexical"
-            case (c, d, l) if c is not None and d is not None:
-                self.version = "dense+colbert"
-            case (c, d, l) if d is not None:
-                self.version = "dense"
-            case (c, d, l) if c is not None:
-                self.version = "colbert"
-            case (c, d, l) if l is not None:
-                self.version = "lexical"
-            case _:
-                raise ValidationError(
-                    "At least one of colbert, dense, lexical must be not None"
-                )
+basic_config = logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def bgem3_embed_trope_examples(
     model: "BGEM3FlagModel",
-    trope_examples: Sequence[TropeExample],
+    data: Sequence[TropeExample],
     return_colbert=False,
     return_dense=True,
     return_lexical=False,
 ):
     output = model.encode(
         batch_size=32,
-        sentences=[example.example for example in trope_examples],
+        sentences=[example.example for example in data],
         return_dense=return_dense,
         return_colbert_vecs=return_colbert,
         return_sparse=return_lexical,
     )
 
-    colbert = output["colbert_vecs"] if return_colbert else [None] * len(trope_examples)
-    dense = output["dense_vecs"] if return_dense else [None] * len(trope_examples)
+    colbert = output["colbert_vecs"] if return_colbert else [None] * len(data)
+    dense = output["dense_vecs"] if return_dense else [None] * len(data)
     lexical = (
-        output["lexical_weights"] if return_lexical else [None] * len(trope_examples)
+        output["lexical_weights"] if return_lexical else [None] * len(data)
     )
 
     out = []
     for colbert, dense, lexical, example in zip(
-        colbert, dense, lexical, trope_examples
+        colbert, dense, lexical, data
     ):
         out.append(
             Embedding(
@@ -79,19 +57,19 @@ def bgem3_embed_trope_examples(
 
 def bgem3_embed_documents_with_chunks(
     model: "BGEM3FlagModel",
-    documents: Sequence[Document],
+    data: Sequence[Document],
     return_colbert=False,
     return_dense=True,
     return_lexical=False,
-):
+) -> list[Embedding]:
     flattend_chunks = [
         (document.document_id, chunk_index, chunk)
-        for document in documents
+        for document in data
         for chunk_index, chunk in enumerate(document.chunks)
     ]
 
     output = model.encode(
-        batch_size=8,
+        batch_size=32,
         sentences=[chunk for _, _, chunk in flattend_chunks],
         return_dense=return_dense,
         return_colbert_vecs=return_colbert,
@@ -115,35 +93,12 @@ def bgem3_embed_documents_with_chunks(
                 model="BAAI/bge-m3",
                 document_id=document_id,
                 document_chunk_index=chunk_index,
-                colbert=colbert,
-                dense=dense,
-                lexical=lexical,
+                colbert=colbert if return_colbert else None,
+                dense=dense if return_dense else None,
+                lexical=lexical if return_lexical else None,
             )
         )
     return out
-
-
-def feed_tropes_to_vespa(
-    trope_examples_crud: BaseTropesCRUD, vespa_crud: VespaCRUD, limit: int = 10
-):
-    for trope_example in trope_examples_crud.batch_generator(
-        batch_size=32, limit=10, offset=1000, exclude_ids=[]
-    ):
-        vespa_crud.feed_trope_examples(trope_example, operation_type="feed")
-
-
-def feed_documents_to_vespa(
-    documents_crud: DocumentsCRUD,
-    vespa_crud: VespaCRUD,
-    limit: int = 10,
-    trope_examples_crud=None,
-):
-    for batch in documents_crud.batch_generator(
-        batch_size=8, limit=10, offset=0, exclude_ids=[]
-    ):
-        if trope_examples_crud is not None:
-            batch = trope_examples_crud.add_info_to_documents(batch)
-        vespa_crud.feed_documents(batch)
 
 
 if __name__ == "__main__":
@@ -169,38 +124,68 @@ if __name__ == "__main__":
     )
 
     argparse.add_argument(
+        "--batch_size",
+        type=int,
+        default=32,
+        help="Number data points in one processing batch",
+    )
+
+    argparse.add_argument(
         "--embed",
         action="store_true",
         default=False,
         help="Whether to encode text data in vespa",
     )
 
-    vespa_crud = VespaCRUD(
-        app=Vespa(url=vespa_config.url, port=vespa_config.port),
-        feedParams=VespaParams(),
+    print(settings.model_dump())
+    args = argparse.parse_args()
+    
+    vespa = Vespa(
+        url=settings.vespa.url,
+        port=settings.vespa.port,
     )
 
-    args = argparse.parse_args()
+    if args.schema == "trope_examples":
+        data_crud = TropeExamplesCRUD.load_from_csv(config=settings.tvtropes, name="lit_goodreads_match")
+        vespa_crud = VespaTropesCRUD(app=vespa, namespace=settings.vespa.namespace, content_cluster_name=settings.vespa.content_cluster)
+        embedder = bgem3_embed_trope_examples
+        
+    elif args.schema == "documents":
+        data_crud = DocumentsCRUD(config=settings.books)
+        vespa_crud = VespaDocumentsCRUD(app=vespa, namespace=settings.vespa.namespace, content_cluster_name=settings.vespa.content_cluster)
+        embedder = bgem3_embed_documents_with_chunks
+
     if args.mode == "embed":
         from FlagEmbedding import BGEM3FlagModel
-
         model = BGEM3FlagModel(
             model_name_or_path="BAAI/bge-m3", use_fp16=True, device="cuda"
         )
-
-        vespa_crud
+        doc_gen = vespa_crud.yield_without_embeddings()
+        while True:
+            try:
+                data = list(islice(doc_gen, args.batch_size))
+                if len(data) == 0:
+                    break
+                embeddings = embedder(
+                    model=model,
+                    data=data,
+                    return_colbert=True,
+                    return_dense=True,
+                )
+                vespa_crud.update_embeddings(
+                    embeddings
+                )
+            except StopIteration:
+                logger.info("All documents have been encoded.")
+                break
+            finally:
+                time.sleep(5)
 
     if args.mode == "feed":
-        if args.schema == "trope_examples":
-            trope_examples_crud = TropeExamplesCRUD.load_from_csv("lit_goodreads_match")
-            feed_tropes_to_vespa(trope_examples_crud, vespa_crud, limit=args.limit)
+        gen = data_crud.batch_generator(
+            batch_size=args.batch_size, limit=args.limit, offset=0, exclude_ids=[]
+        )
+        for batch in gen:
+            vespa_crud.feed(batch)
 
-        elif args.schema == "documents":
-            documents_crud = DocumentsCRUD(config=books_config)
-            trope_examples_crud = TropeExamplesCRUD.load_from_csv("lit_goodreads_match")
-            feed_documents_to_vespa(
-                documents_crud,
-                vespa_crud,
-                limit=args.limit,
-                trope_examples_crud=trope_examples_crud,
-            )
+           

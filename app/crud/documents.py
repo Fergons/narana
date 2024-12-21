@@ -1,8 +1,10 @@
 from app.config import BooksConfig
 from app.models.documents import Document
 from app.utils import epub_to_documents, word_chunk
+from dataclasses import dataclass
 
 
+@dataclass
 class DocumentsCRUD:
     def __init__(self, config: "BooksConfig") -> None:
         self.config = config
@@ -76,3 +78,6 @@ class DocumentsCRUD:
             if len(docs) == batch_size:
                 yield docs
                 docs = []
+
+
+    

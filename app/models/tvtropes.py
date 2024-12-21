@@ -59,7 +59,7 @@ class TropeExample(BaseModel):
     # IMDB match
     tconst: str | None = Field(default=None)
 
-    model_config = ConfigDict(extra='ignore')
+    model_config = ConfigDict(extra='ignore', populate_by_name=True)
 
 """
         Title	                    Trope	    Example	                   \ 
@@ -83,7 +83,7 @@ class Trope(BaseModel):
     trope: str = Field(..., alias="Trope")
     description: str = Field(..., alias="Description")
 
-    model_config = ConfigDict(extra='ignore')
+    model_config = ConfigDict(extra='ignore', populate_by_name=True)
 
 
 

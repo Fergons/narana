@@ -1,25 +1,26 @@
 from abc import abstractmethod
 import pandas as pd
 from dataclasses import dataclass
-from app.config import tvtropes_config
+from app.config import TVTropesConfig
 from app.models.documents import Document
-from app.models.tvtropes import TropeExample, TROPE_EXAMPLES_TABLES, TROPES_TABLE, Trope, Title, TropeExample
+from app.models.tvtropes import TropeExample, TROPE_EXAMPLES_TABLES, TROPES_TABLE, Trope, Title
 from pydantic import TypeAdapter
-from typing import Generator, Generic, TypeVar
+from typing import Generator
 
 
 @dataclass
 class BaseTropesCRUD:
     name: str
     df: pd.DataFrame
+    config: TVTropesConfig
 
     @classmethod
-    def load_from_csv(cls, name: TROPE_EXAMPLES_TABLES | TROPES_TABLE):
-        df = pd.read_csv(tvtropes_config.get_csv_file_path(name))
-        return cls(df=df, name=name)
+    def load_from_csv(cls, config, name: TROPE_EXAMPLES_TABLES | TROPES_TABLE):
+        df = pd.read_csv(config.get_csv_file_path(name))
+        return cls(df=df, config=config, name=name)
 
     def save_to_csv(self):
-        self.df.to_csv(tvtropes_config.get_csv_file_path(self.name), index=True)
+        self.df.to_csv(self.config.get_csv_file_path(self.name), index=True)
 
     @abstractmethod
     def batch_generator(self, batch_size: int, limit: int, offset: int, exclude_ids: list[str]) -> Generator[list,None, None]:

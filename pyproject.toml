@@ -26,6 +26,7 @@ tenacity = "^9.0.0"
 orjson = "^3.10.11"
 outlines = "^0.1.5"
 httpx = {extras = ["socks"], version = "^0.27.2"}
+pydantic-settings = "^2.7.0"
 
 
 [[tool.poetry.source]]
