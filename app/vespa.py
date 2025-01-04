@@ -78,10 +78,10 @@ trope_example_embedding_schema = Schema(
     rank_profiles=[
         RankProfile(
             name="dense",
-            first_phase=FirstPhaseRanking(
-                expression="closeness(dense_rep)",
-                rank_score_drop_limit=0.3,
-            ),
+            inputs=[("query(q_dense)", "tensor<bfloat16>(x[1024])")],
+            inherits="default",
+            first_phase="closeness(field, dense_rep)",
+            match_features=["closeness(field, dense_rep)"],
         ),
         RankProfile(
             name="colbert",
@@ -148,6 +148,7 @@ doc_embedding_schema = Schema(
                 name="colbert_rep",
                 type="tensor<bfloat16>(chunk{},token{},x[1024])",
                 indexing=["index", "attribute"],
+                ann=HNSW(distance_metric="angular")
             ),
             Field(name="document_id", type="string", indexing=["attribute", "summary"]),
         ],
@@ -156,10 +157,10 @@ doc_embedding_schema = Schema(
     rank_profiles=[
         RankProfile(
             name="dense",
-            # inputs=[("query(q)", "tensor<bfloat16>(x[1024])")],
+            inputs=[("query(q_dense)", "tensor<bfloat16>(x[1024])")],
             inherits="default",
-            first_phase="closeness(dense_rep)",
-            match_features=["closeness(dense_rep)"],
+            first_phase="closeness(field, dense_rep)",
+            match_features=["closeness(field, dense_rep)"],
         ),
         RankProfile(
             name="colbert",
@@ -172,11 +173,15 @@ doc_embedding_schema = Schema(
                     name="max_sim",
                     expression="sum(reduce(sum(query(q_colbert) * attribute(colbert_rep), x), max, token), qt, chunk) / query(q_len_colbert)",
                 ),
+                Function(
+                    name="per_chunk_max_sim",
+                    expression="sum(reduce(sum(query(q_colbert) * attribute(colbert_rep), x), max, token), qt) / query(q_len_colbert)",
+                )
             ],
             first_phase=FirstPhaseRanking(
                 expression="max_sim",
-                rank_score_drop_limit=0.0,
             ),
+            match_features=["max_sim", "per_chunk_max_sim"],
         ),
         RankProfile(
             name="hybrid",
@@ -194,6 +199,10 @@ doc_embedding_schema = Schema(
                     name="avg_dense",
                     expression="reduce(cosine_similarity(query(q_dense), attribute(dense_rep), x), avg, chunk)",
                 ),
+                Function(
+                    name="per_chunk_dense",
+                    expression="cosine_similarity(query(q_dense), attribute(dense_rep), x)",
+                ),
                 # max_sim to handle an extra dimension chunk{} and token{}
                 # - sum over x dimension: sum(query(q_colbert)*attribute(colbert_rep), x)
                 #   This leaves dimensions qt{}, chunk{}, token{}.
@@ -207,14 +216,14 @@ doc_embedding_schema = Schema(
                 ),
             ],
             first_phase=FirstPhaseRanking(
-                expression="avg_dense",
-                rank_score_drop_limit=0.0,
+                expression="max_dense + bm25(chunks)",
+                rank_score_drop_limit=0.3,
             ),
             second_phase=SecondPhaseRanking(
                 expression="max_sim",
                 rerank_count=100,
             ),
-            match_features=["avg_dense", "max_dense", "max_sim"],
+            match_features=["avg_dense", "max_dense", "max_sim", "per_chunk_dense", "bm25(chunks)"],
         ),
     ],
 )
