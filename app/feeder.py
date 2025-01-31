@@ -26,7 +26,6 @@ def bgem3_embed_trope_examples(
     return_lexical=False,
 ):
     output = model.encode(
-        batch_size=32,
         sentences=[example.example for example in data],
         return_dense=return_dense,
         return_colbert_vecs=return_colbert,
@@ -69,7 +68,6 @@ def bgem3_embed_documents_with_chunks(
     ]
 
     output = model.encode(
-        batch_size=32,
         sentences=[chunk for _, _, chunk in flattend_chunks],
         return_dense=return_dense,
         return_colbert_vecs=return_colbert,
@@ -124,6 +122,13 @@ if __name__ == "__main__":
     )
 
     argparse.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        help="Start from offset",
+    )
+
+    argparse.add_argument(
         "--batch_size",
         type=int,
         default=32,
@@ -137,8 +142,22 @@ if __name__ == "__main__":
         help="Whether to encode text data in vespa",
     )
 
+    argparse.add_argument(
+        "--title_ids_file",
+        type=str,
+        default=None,
+        help="File containing title ids of books to feed. If not provided, all books will be fed. The file should be a csv with a column 'title_id'.",
+    )
+
     print(settings.model_dump())
     args = argparse.parse_args()
+    
+    if args.title_ids_file is not None:
+        import pandas as pd
+        df = pd.read_csv(args.title_ids_file)
+        title_ids = df["title_id"].tolist()
+    else:
+        title_ids = None
     
     vespa = Vespa(
         url=settings.vespa.url,
@@ -152,13 +171,15 @@ if __name__ == "__main__":
         
     elif args.schema == "documents":
         data_crud = DocumentsCRUD(config=settings.books)
+        tropes_crud = TropeExamplesCRUD.load_from_csv(config=settings.tvtropes, name="lit_goodreads_match")
         vespa_crud = VespaDocumentsCRUD(app=vespa, namespace=settings.vespa.namespace, content_cluster_name=settings.vespa.content_cluster)
         embedder = bgem3_embed_documents_with_chunks
 
     if args.mode == "embed":
         from FlagEmbedding import BGEM3FlagModel
         model = BGEM3FlagModel(
-            model_name_or_path="BAAI/bge-m3", use_fp16=True, device="cuda"
+            model_name_or_path="BAAI/bge-m3", use_fp16=True, device="cuda",
+            batch_size=32
         )
         doc_gen = vespa_crud.yield_without_embeddings()
         while True:
@@ -183,9 +204,11 @@ if __name__ == "__main__":
 
     if args.mode == "feed":
         gen = data_crud.batch_generator(
-            batch_size=args.batch_size, limit=args.limit, offset=0, exclude_ids=[]
+            batch_size=args.batch_size, limit=args.limit, offset=args.offset, exclude_ids=[], title_ids=title_ids
         )
         for batch in gen:
+            if args.schema == "documents":
+                batch = tropes_crud.add_info_to_documents(batch)
             vespa_crud.feed(batch)
 
            

@@ -3,19 +3,19 @@ import httpx
 import asyncio
 from app.models.tvtropes import LibgenSearchResult, Title
 from app.crud.tvtropes import TropeExamplesCRUD
-from app.utils import retry_fetch
+from app.utils.file import retry_fetch
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from anyio.streams.file import FileWriteStream
-import re
 from utils.string import camel_to_string
 
 import orjson
-from app.config import tvtropes_config, books_config
+from app.config import settings
 import logging
 
-from app.utils import load_jsonl, async_load_jsonl
+from app.utils.file import  async_load_jsonl
 from tqdm import tqdm
+from pathlib import Path
 
 from pydantic import TypeAdapter
 
@@ -24,8 +24,8 @@ from dotenv import dotenv_values
 import argparse
 
 
-basic_config = logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 environ = dotenv_values(".env")
 
@@ -134,6 +134,7 @@ async def produce_search_results_for_title(
     # substitute uppercase letters before that letter followed by a space
     processed_title = camel_to_string(title.title)
     results = await search(session, q=f'{processed_title} {title.author if title.author else ""}')
+    logger.debug(f"Produced {results} for {title.title_id}")
     await send_stream.send({"title_id": title.title_id, 'hits': results})
     await send_stream.aclose()
 
@@ -150,7 +151,7 @@ async def save_search_results(
 async def search_and_store_titles_from_libgen(
     session: httpx.AsyncClient, titles: list[Title]
 ):
-    csv_path = tvtropes_config.csv_dir / "libgen.jsonl"
+    csv_path = settings.tvtropes.csv_dir / "libgen.jsonl"
     send_stream, receive_stream = anyio.create_memory_object_stream[dict]()
     async with await FileWriteStream.from_path(csv_path, append=True) as fstream:
         try:
@@ -158,35 +159,37 @@ async def search_and_store_titles_from_libgen(
                 tg.start_soon(save_search_results, fstream, receive_stream)
                 async with send_stream:
                     for title in titles:
+                        logger.debug(f"Adding {title.title_id} to the task group")
                         tg.start_soon(
                             produce_search_results_for_title,
                             session,
                             title,
                             send_stream.clone(),
                         )
-        except* httpx.HTTPError as e:
-            logger.error(e)
+                        
+        except Exception as e:
+            logger.error(f"Task group error: {e}")
+            # Log all sub-exceptions if it's an ExceptionGroup
+            if hasattr(e, 'exceptions'):
+                for sub_exc in e.exceptions:
+                    logger.error(f"Sub-exception: {sub_exc}")
 
-        except* httpx.TimeoutException as e:
-            logger.error(e)
-
-        except* httpx.RequestError as e:
-            logger.error(e)
 
 
-async def get_tvtropes_titles_from_libgen():
+async def get_tvtropes_titles_from_libgen(scraped_path=None):
     exclude_ids = set()
-    scraped_path = tvtropes_config.csv_dir / "libgen.jsonl"
+    if scraped_path is None:
+        scraped_path = settings.tvtropes.csv_dir / "libgen.jsonl"
     if not scraped_path.exists():
         scraped_path.touch()
     scraped_titles = [
         title
-        async for title in async_load_jsonl(tvtropes_config.csv_dir / "libgen.jsonl")
+        async for title in async_load_jsonl(settings.tvtropes.csv_dir / "libgen.jsonl")
     ]
     for title in scraped_titles:
         exclude_ids.add(title["title_id"])
     
-    goodreadsTropesCRUD = TropeExamplesCRUD.load_from_csv('lit_goodreads_match')
+    goodreadsTropesCRUD = TropeExamplesCRUD.load_from_csv(settings.tvtropes, 'lit_goodreads_match')
     titles = goodreadsTropesCRUD.get_titles(
         limit=10000000, exclude_ids=list(exclude_ids)
     )
@@ -203,7 +206,9 @@ async def get_tvtropes_titles_from_libgen():
                     max_keepalive_connections=10, max_connections=10, keepalive_expiry=5.0
                 ),
             ) as session:
+                logger.debug(f"Starting to scrape {batch}")
                 await search_and_store_titles_from_libgen(session, batch)
+                logger.debug(f"Finished scraping batched {batch}")
         else:
             async with httpx.AsyncClient(limits=httpx.Limits(
                     max_keepalive_connections=10, max_connections=10, keepalive_expiry=5.0
@@ -211,16 +216,24 @@ async def get_tvtropes_titles_from_libgen():
                 await search_and_store_titles_from_libgen(session, batch)
 
 
-def download_books_scraped(scraped_list_path, limit: 1000, offset: 0):
+def download_books_scraped(scraped_list_path, limit: 1000, offset: 0, title_ids: list[str] = None):
     with open(scraped_list_path, "r") as f:
         scraped_books = [orjson.loads(line) for line in f]
 
-    downloaded_books = books_config.dir.glob("*.epub")
+    logger.info(f"Scraped books: {len(scraped_books)}")
+    if title_ids:
+        logger.info(f"Filtering scraped books for title_ids: {title_ids}")
+        scraped_books = [book for book in scraped_books if book["title_id"] in title_ids and book["hits"]]
+
+    downloaded_books = settings.books.dir.glob("*.epub")
     downloaded_books = [book.stem for book in downloaded_books]
 
     scraped_books = TypeAdapter(list[LibgenSearchResult]).validate_python(scraped_books)
     scraped_books = [book for book in scraped_books if len(book.hits) > 0 and book.title_id not in downloaded_books]
 
+    if len(scraped_books) == 0:
+        logger.info("No hits on libgen. Skipping download.")
+        return
 
     for book in scraped_books[offset: offset + limit]:
         for hit in book.hits:
@@ -238,7 +251,7 @@ def download_books_scraped(scraped_list_path, limit: 1000, offset: 0):
                             response = httpx.get(direct_download_link)
                             
                             with open(
-                                books_config.dir / f"{book.title_id}.epub", "wb"
+                                settings.books.dir / f"{book.title_id}.epub", "wb"
                             ) as f:
                                 f.write(response.content)
                             saved = True
@@ -253,6 +266,91 @@ def download_books_scraped(scraped_list_path, limit: 1000, offset: 0):
          
     
             
+async def search_and_download_titles(title_ids: list[str]):
+    logger.info(f"Searching and downloading titles: {title_ids}")
+    
+    # Load goodreads data
+    goodreadsTropesCRUD = TropeExamplesCRUD.load_from_csv(settings.tvtropes, 'lit_goodreads_match')
+    titles_to_search = [t for t in goodreadsTropesCRUD.get_titles(limit=10000000) if t.title_id in title_ids]
+    
+    if len(titles_to_search) == 0:
+        logger.warning(f"No titles matched in goodreads: {title_ids}")
+        return
+
+    # Create books directory
+    settings.books.dir.mkdir(parents=True, exist_ok=True)
+    
+    TIMEOUT = httpx.Timeout(connect=5, read=5, write=5, pool=5)  # Timeout settings
+    
+    # Process each title
+    for title in titles_to_search:
+        try:
+            logger.info(f"Processing {title.title_id}: {title.title}")
+            
+            # Skip if already downloaded
+            if (settings.books.dir / f"{title.title_id}.epub").exists():
+                logger.info(f"Book already downloaded: {title.title_id}")
+                continue
+                
+            # Search on libgen
+            async with httpx.AsyncClient(
+                proxy=environ.get("PROXY") if environ.get("PROXY") else None,
+                timeout=TIMEOUT,
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10, keepalive_expiry=5.0)
+            ) as session:
+                processed_title = camel_to_string(title.title)
+                search_query = f'{processed_title} {title.author if title.author else ""}'
+                results = await search(session, q=search_query)
+                
+                if not results:
+                    logger.warning(f"No results found for {title.title_id}")
+                    continue
+                
+                # Try each search result
+                for hit in results:
+                    saved = False
+                    for link in hit["download_urls"]:
+                        try:
+                            # Get download page
+                            response = await session.get(str(link))
+                            response.raise_for_status()
+                            
+                            # Extract direct download link
+                            direct_link = extract_download_link(response.content)
+                            if not direct_link:
+                                continue
+                                
+                            # Download book
+                            response = await session.get(direct_link, timeout=TIMEOUT)
+                            response.raise_for_status()
+                            
+                            # Save book
+                            with open(settings.books.dir / f"{title.title_id}.epub", "wb") as f:
+                                f.write(response.content)
+                            saved = True
+                            logger.info(f"Successfully downloaded: {title.title_id}")
+                            break
+                            
+                        except httpx.TimeoutException as e:
+                            logger.error(f"Timeout downloading {title.title_id}: {e}")
+                            continue
+                        except httpx.HTTPError as e:
+                            logger.error(f"HTTP error for {title.title_id}: {e}")
+                            continue
+                        except Exception as e:
+                            logger.error(f"Error downloading {title.title_id}: {e}")
+                            continue
+                            
+                    if saved:
+                        break
+                        
+                if not saved:
+                    logger.warning(f"Failed to download any version of {title.title_id}")
+                    
+        except Exception as e:
+            logger.error(f"Error processing title {title.title_id}: {e}")
+            continue
+
 if __name__ == "__main__":
     # parse program arguments and run
     parser = argparse.ArgumentParser(description="Download books from Libgen")
@@ -283,15 +381,21 @@ if __name__ == "__main__":
     parser.add_argument(
         "--scraped_list_path",
         type=str,
-        default=tvtropes_config.csv_dir / "libgen.jsonl",
+        default=settings.tvtropes.csv_dir / "libgen.jsonl",
         help="Path to scraped list of books",
+    )
+    parser.add_argument(
+        "--title_ids",
+        type=str,
+        default=None,
+        help="Title ids to download",
     )
 
     args = parser.parse_args()
     if args.scrape:
         anyio.run(get_tvtropes_titles_from_libgen)
-    if args.download:
-        download_books_scraped(args.scraped_list_path, args.limit, args.offset)
-
+    elif args.download:
+        download_books_scraped(args.scraped_list_path, args.limit, args.offset, args.title_ids.split(',') if args.title_ids else [])
+    elif args.title_ids:
+        anyio.run(search_and_download_titles, args.title_ids.split(','))
             
-

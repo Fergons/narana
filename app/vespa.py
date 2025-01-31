@@ -170,13 +170,13 @@ doc_embedding_schema = Schema(
             ],
             functions=[
                 Function(
-                    name="max_sim",
-                    expression="sum(reduce(sum(query(q_colbert) * attribute(colbert_rep), x), max, token), qt, chunk) / query(q_len_colbert)",
+                    name="per_chunk_max_sim",
+                    expression="sum(reduce(cosine_similarity(query(q_colbert), attribute(colbert_rep), x), max, token), qt) / query(q_len_colbert)",
                 ),
                 Function(
-                    name="per_chunk_max_sim",
-                    expression="sum(reduce(sum(query(q_colbert) * attribute(colbert_rep), x), max, token), qt) / query(q_len_colbert)",
-                )
+                    name="max_sim",
+                    expression="reduce(per_chunk_max_sim, max, chunk)",
+                ),
             ],
             first_phase=FirstPhaseRanking(
                 expression="max_sim",

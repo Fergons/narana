@@ -67,6 +67,7 @@ class VespaRetriever(Retriever[Any, RetrieverStrQueryType]):
         self,
         input: RetrieverStrQueriesType,
         top_k: Optional[int] = None,
+        embedding_type: Optional[str] = None,
         **kwargs,
     ) -> List[RetrieverOutput]:
         """
@@ -75,8 +76,8 @@ class VespaRetriever(Retriever[Any, RetrieverStrQueryType]):
         top_k = top_k or self.top_k
         queries = input if isinstance(input, list) else [input]
         query_embeddings = None
-        if self.embedder is not None:
-            query_embeddings = self.embedder(queries, embedding_type=self.rank_profile, **kwargs)
+        if self.embedder is not None and embedding_type is not None:
+            query_embeddings = self.embedder(queries, embedding_type=embedding_type, **kwargs)
 
         # If you have an embedder, embed all queries up-front (used in "dense"/"colbert" retrievals)
 
@@ -107,8 +108,8 @@ class VespaRetriever(Retriever[Any, RetrieverStrQueryType]):
                         "Provide an embedder that returns multi-vector embeddings or pass them explicitly."
                     )
                 colbert_tensor = query_embeddings.data[i].embedding  # shape [qt, 1024]
-                query_len = float(colbert_tensor.shape[0])  # number of tokens
-                response = self._query_colbert(colbert_tensor, query_len, top_k=top_k)
+                query_len = float(len(colbert_tensor))  # number of tokens
+                response = self._query_colbert(query=query_text, colbert_tensor=colbert_tensor, query_len=query_len, top_k=top_k)
             else:
                 raise ValueError(f"Unsupported rank profile: {self.rank_profile}")
 
@@ -154,9 +155,11 @@ class VespaRetriever(Retriever[Any, RetrieverStrQueryType]):
             # The entire record is in hit["fields"] - parse as needed.
             doc_dict = {
                 "id": hit["id"],  # or a unique doc field
-                "metadata": hit["fields"],  # store everything in metadata
+                "text": hit["fields"].get("chunks", [""])[0],
+                "meta_data": hit["fields"],  # store everything in metadata
+                "score": hit["relevance"],
             }
-            print(doc_dict)
+            print(hit["fields"]) 
             docs.append(Document.from_dict(doc_dict))
         return docs
 
@@ -215,7 +218,7 @@ class VespaRetriever(Retriever[Any, RetrieverStrQueryType]):
         colbert_tensor: Union[np.ndarray, list],
         query_len: float,
         top_k: int,
-        timeout: int = None,
+        timeout: int = 1500,
     ) -> Optional[VespaQueryResponse]:
         """
         Vector-based query using 'colbert' rank_profile.
@@ -355,6 +358,7 @@ class M3Embdder:
 
     @staticmethod
     def _embedding_type_to_param(embedding_type: str) -> str:
+        
         default = {
             "return_dense": False,
             "return_colbert_vecs": False,
@@ -390,9 +394,13 @@ if __name__ == "__main__":
     from app.config import settings
 
     queries = [
-        "The quick brown fox jumps over the lazy dog",
-        "Who is Hercuile Poirot?",
-        "Heroes never die.",
+        """Query: Related to the Genius Ditz or the Crouching Moron, Hidden Badass, you have the Brilliant, But Lazy character, who is more than capable of taking care of any situation that the heroes have to deal with, but doesn't care. They'd rather relax and do nothing to help. This character will likely Refuse The Call when it comes, feeling that, whatever's going on, it's not their problem. Expect them to be very sarcastic as well.
+Expect such a character to be indifferent, uncaring, and, at worst, obnoxious or self-centered.
+However, when it's crunch time, and the heroes need someone to come save them, guess who decides to give them a break?
+Often a form of Obfuscating Stupidity. Can be associated with Book Dumb. If they're also rich, they may be an Upper-Class Twit. When they try to be The Slacker, they usually turn into a Professional Slacker. See also Unskilled, but Strong, which a Brilliant But Lazy character can be if they have great power but don't bother working to improve on it.
+An obvious subversion here is the notable difference between someone who actually is Brilliant But Lazy and someone who thinks they're Brilliant But Lazy but is actually just Lazy. This also applies to those who are secretly afraid they're not brilliant and hence refuse to exert themselves for fear they'll be exposed. They should also beware of falling into the trap of Laborious Laziness if they find that their smarts and their desire to avoid doing work are, in fact, making them work harder at being lazy than they would be working if they just did what they were supposed to.
+May overlap with the Erudite Stoner, whose laziness comes from being under the influence, the Absent-Minded Professor, who may seem lazy because his intellect distracts him from everyday tasks, Jerk with a Heart of Gold, and Deliberate Under-Performance. Contrast Dumb, but Diligent, Nerds Love Tough Schoolwork, and High Hopes, Zero Talent (one who doesn't slack but never really gets there). See also, Hidden Depths. Not to be confused with Genius Slob.
+"""
     ]
 
     embedder = M3Embdder(max_length=2048, batch_size=64)
@@ -403,11 +411,11 @@ if __name__ == "__main__":
         vespa_port=settings.vespa_port,
         top_k=3,
         schema="document_embeddings",
-        rank_profile="dense",
+        rank_profile="bm25",
     )
 
     print(retriever.call(
-        queries, top_k=3
+        queries, top_k=3, embedding_type=None
     ))
     # from FlagEmbedding import BGEM3FlagModel
 

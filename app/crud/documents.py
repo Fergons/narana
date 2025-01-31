@@ -1,6 +1,6 @@
 from app.config import BooksConfig
 from app.models.documents import Document
-from app.utils import epub_to_documents, word_chunk
+from app.utils.document_processing import epub_to_documents, word_chunk
 from dataclasses import dataclass
 
 
@@ -44,6 +44,7 @@ class DocumentsCRUD:
         limit: int = 10,
         offset: int = 0,
         exclude_ids: list[str] = [],
+        title_ids: list[str] = None,
     ):
         epubs = self.get_epub_paths(limit, offset, exclude_ids)
         for epub in epubs:
@@ -71,9 +72,10 @@ class DocumentsCRUD:
         limit: int = 10,
         offset: int = 0,
         exclude_ids: list[str] = [],
+        title_ids: list[str] = None
     ):
         docs = []
-        for doc in self.document_generator(limit, offset, exclude_ids):
+        for doc in self.document_generator(limit, offset, exclude_ids, title_ids):
             docs.append(doc)
             if len(docs) == batch_size:
                 yield docs
