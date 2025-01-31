@@ -73,6 +73,9 @@ class BookCompanion:
     def get_character_list_for_title(self, title: str) -> Path:
         return self.characters.groupby('title').get_group(title)['character_list'].values[0]
     
+    def get_character_list_for_character_list_url(self, character_list_url: str) -> dict:
+        return self.characters[self.characters['character_list_url'] == character_list_url].to_dict(orient='records')
+    
     def get_goodreads_link_for_title(self, title: str) -> Path:
         return self.book_list[self.book_list['title'] == title]['goodreads_link'].values[0]
    
