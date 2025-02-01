@@ -205,6 +205,28 @@ class VespaDocumentsCRUD(BaseVespaCRUD):
         self.feed_iterable(
             update_docs, operation_type="update", auto_assign=False, **kwargs
         )
+
+    def get_all_parent_ids(self) -> List[str]:
+        """
+        Returns a list of parent_ids from all docs in this schema using visit.
+        """
+        parent_ids = set()  # Using set to avoid duplicates
+        
+        # Visit all documents in batches
+        for slice_res in self.visit_all(
+            selection="true",
+            slices=4,  # Number of parallel slices
+            wanted_document_count=500  # Documents per batch
+        ):
+            for vespa_response in slice_res:
+                if vespa_response.is_successful():
+                    for doc in vespa_response.documents:
+                        if "fields" in doc and "parent_id" in doc["fields"]:
+                            parent_ids.add(doc["fields"]["parent_id"])
+                else:
+                    logger.warning(f"Visit response unsuccessful: {vespa_response.get_json()}")
+                
+        return list(parent_ids)
     
     def yield_without_embeddings(self) -> Generator[Document, None, None]:
         """
@@ -329,10 +351,13 @@ def prepare_update_tvtrope_examples_embeddings(
 
 
 if __name__ == "__main__":
-    app = Vespa(url="sss", port=8080)
+    app = Vespa(url="http://localhost", port=8080)
     crud = VespaDocumentsCRUD(
         app=app,
         content_cluster_name="narana_content",
         namespace="narana",
     )
     print(crud.schema_name)
+    print(len(crud.get_all_parent_ids()))
+
+

@@ -78,8 +78,8 @@ class BooksConfig(BaseModel):
     Configuration for the Books dataset or chunking logic.
     """
     dir: DirectoryPath = Field(default=Path("./data/books"))
-    max_chunk_size: int = Field(default=1000, description="Max chunk size in words")
-    overlap: int = Field(default=250, description="Overlap in words")
+    max_chunk_size: int = Field(default=256, description="Max chunk size in words")
+    overlap: int = Field(default=64, description="Overlap in words")
 
     def finalize(self) -> "BooksConfig":
         """
@@ -88,8 +88,16 @@ class BooksConfig(BaseModel):
         if self.overlap >= self.max_chunk_size:
             object.__setattr__(self, "overlap", self.max_chunk_size // 2)
         return self
+    
 
+class BookCompanionConfig(BaseModel):
+    """
+    Configuration for the BookCompanion dataset.
+    """
+    dir: DirectoryPath = Field(default=Path("./data/bookcompanion"))
 
+    def finalize(self) -> "BookCompanionConfig":
+        return self
 
 class VespaConfig(BaseModel):
     """
@@ -133,6 +141,7 @@ class AppSettings(BaseSettings):
     tvtropes: TVTropesConfig = TVTropesConfig()
     books: BooksConfig = BooksConfig()
     vespa: VespaConfig = VespaConfig()
+    bookcompanion: BookCompanionConfig = BookCompanionConfig()
 
     def post_init(self) -> "AppSettings":
         """
@@ -159,9 +168,15 @@ class AppSettings(BaseSettings):
             "content_cluster": self.vespa_content_cluster,
         }).finalize()
 
+
+        new_bookcompanion = self.bookcompanion.model_copy(update={
+            "dir": self.data_folder / "bookcompanion",
+        }).finalize()
+
         object.__setattr__(self, "tvtropes", new_tvt)
         object.__setattr__(self, "books", new_books)
         object.__setattr__(self, "vespa", new_vespa)
+        object.__setattr__(self, "bookcompanion", new_bookcompanion)
 
         return self
     

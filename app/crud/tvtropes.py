@@ -50,6 +50,9 @@ class TropeExamplesCRUD(BaseTropesCRUD):
         filtered_df = filtered_df[~filtered_df["title_id"].isin(exclude_ids)]
         return TypeAdapter(list[Title]).validate_python(filtered_df[offset:offset + limit].to_dict(orient="records"))
     
+    def get_all_titles_for_trope_ids(self, trope_ids: list[str]) -> list[str]:
+        return self.df[self.df["trope_id"].isin(trope_ids)]["title_id"].unique().tolist()
+    
     def batch_generator(self, batch_size: int = 32, limit: int = 10, offset: int = 0, exclude_ids: list[str] = []) -> Generator[list[TropeExample], None, None]:
         filtered_df = self.df[~self.df["title_id"].isin(exclude_ids)]
         filtered_df = filtered_df.dropna(subset=["Example", "Title", "trope_id", "title_id"])
@@ -91,3 +94,7 @@ class TropesCRUD(BaseTropesCRUD):
 #TODO: add more tropes
 # FilmTropesCRUD = TropeExamplesCRUD.load_from_csv('film_tropes')
 # TvTropesCRUD = TropeExamplesCRUD.load_from_csv('tv_tropes')
+
+if __name__ == "__main__":
+    tvtropes_crud = TropeExamplesCRUD.load_from_csv('lit_goodreads_match')
+    print(tvtropes_crud.get_all_titles_for_trope_ids([""]))
