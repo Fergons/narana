@@ -9,3 +9,9 @@ poetry.lock
 *.tsv
 *.pdf
 /data/
+traces/CharacterIdentificationOutput/generator_state_trace.json
+dendrogram_annotated.png
+umap_projection_by_genre.png
+traces/CharacterIdentificationOutput/logger_metadata.json
+traces/CharacterIdentificationOutput/llm_call.jsonl
+notebooks/topic_model.pkl
