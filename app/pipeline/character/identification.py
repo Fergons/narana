@@ -31,7 +31,6 @@ template = r"""<START_OF_SYSTEM_MESSAGE>
  {% endif %}
  <END_OF_SYSTEM_MESSAGE>
  <START_OF_USER_MESSAGE>
- {{input_str}}
  <END_OF_USER_MESSAGE>
  """
 
@@ -69,7 +68,7 @@ class CharacterList(DataClass):
             ]
         )
 
-    __input_fields__ = ["story", "identified_characters"]
+    __input_fields__ = []
     __output_fields__ = ["characters"]
 
 @trace_generator_call()
@@ -92,7 +91,7 @@ class CharacterIdentificationOutput(Component):
         self.data_class = CharacterList
         self.data_class.set_task_desc(task_desc_str)
         self.parser = DataClassParser(
-            data_class=CharacterList, return_data_class=True, format_type="yaml"
+            data_class=CharacterList, return_data_class=True, format_type="json"
         )
         prompt_kwargs = {
             "system_prompt": Parameter(
@@ -127,13 +126,19 @@ class CharacterIdentificationOutput(Component):
     def _prepare_input(self, document: Document):
         # input_str = self.parser.get_input_str(input_data)
         prompt_kwargs = {
-            "input_str": Parameter(
+            "story": Parameter(
                 data=document.text,
                 requires_opt=False,
                 role_desc="New story snippet to identify characters in.",
-            )
+            ),
+            "identified_characters": Parameter(
+                data=self.characters,
+                requires_opt=False,
+                role_desc="Previously identified characters",
+            ),
         }
         return prompt_kwargs
+
 
     def call(
         self, document: Document, id: Optional[str] = None

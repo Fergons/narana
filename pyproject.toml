@@ -32,7 +32,7 @@ ollama = "^0.4.7"
 umap-learn = "^0.5.7"
 hdbscan = "^0.8.40"
 embedding-adapter = "^0.1.1"
-bertopic = "^0.16.4"
+bertopic = {extras = ["spacy"], version = "^0.16.4"}
 nbformat = "^5.10.4"
 
 
