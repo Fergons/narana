@@ -34,6 +34,9 @@ hdbscan = "^0.8.40"
 embedding-adapter = "^0.1.1"
 bertopic = {extras = ["spacy"], version = "^0.16.4"}
 nbformat = "^5.10.4"
+llvmlite = "^0.44.0"
+pacmap = "^0.7.6"
+pyvis = "^0.3.2"
 
 
 [[tool.poetry.source]]

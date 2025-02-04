@@ -112,6 +112,7 @@ class TVTropesDataset:
     
     def get_split_for_n_examples_k_classes(self, n: int, k: int) -> pd.DataFrame:
         merged = pd.concat([self.film_tropes, self.tv_tropes, self.lit_tropes])
+        merged = merged.drop_duplicates(subset=['Example'])
         merged = self.preprocess_examples(merged)
         label_freq = merged["trope_id"].value_counts()
         n_per_label = n // k
