@@ -34,6 +34,8 @@ hdbscan = "^0.8.40"
 embedding-adapter = "^0.1.1"
 bertopic = {extras = ["spacy"], version = "^0.16.4"}
 nbformat = "^5.10.4"
+nudge-ft = "^0.1.2"
+python-louvain = "^0.16"
 
 
 [[tool.poetry.source]]
