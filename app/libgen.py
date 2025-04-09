@@ -3,7 +3,7 @@ import httpx
 import asyncio
 from app.models.tvtropes import LibgenSearchResult, Title
 from app.crud.tvtropes import TropeExamplesCRUD
-from app.utils.file import retry_fetch
+from app.utils.http import retry_fetch
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from anyio.streams.file import FileWriteStream
@@ -13,7 +13,7 @@ import orjson
 from app.config import settings
 import logging
 
-from app.utils.file import  async_load_jsonl
+from app.utils.jsonl import  async_load_jsonl
 from tqdm import tqdm
 from pathlib import Path
 
@@ -263,22 +263,27 @@ def download_books_scraped(scraped_list_path, limit: 1000, offset: 0, title_ids:
             if saved:
                 break
                     
-         
-    
-            
-async def search_and_download_titles(title_ids: list[str]):
-    logger.info(f"Searching and downloading titles: {title_ids}")
-    
-    # Load goodreads data
+async def search_and_download_by_ids(save_dir: Path, title_ids: list[str] = None):
     goodreadsTropesCRUD = TropeExamplesCRUD.load_from_csv(settings.tvtropes, 'lit_goodreads_match')
     titles_to_search = [t for t in goodreadsTropesCRUD.get_titles(limit=10000000) if t.title_id in title_ids]
-    
     if len(titles_to_search) == 0:
         logger.warning(f"No titles matched in goodreads: {title_ids}")
         return
+    await search_and_download_titles(save_dir, titles_to_search)
 
-    # Create books directory
-    settings.books.dir.mkdir(parents=True, exist_ok=True)
+async def search_and_download_by_file(save_dir: Path, titles_file: str = None):
+    with open(titles_file, "r") as f:
+        titles_to_search = [Title(**orjson.loads(line)) for line in f]    
+    if len(titles_to_search) == 0:
+        logger.warning(f"No titles loaded from file: {titles_file}")
+        return
+    await search_and_download_titles(save_dir, titles_to_search)
+    
+            
+async def search_and_download_titles(save_dir: Path, titles: list[Title] = None):
+    logger.info(f"Searching and downloading titles: {titles}")
+    titles_to_search = titles
+    save_dir.mkdir(parents=True, exist_ok=True)
     
     TIMEOUT = httpx.Timeout(connect=5, read=5, write=5, pool=5)  # Timeout settings
     
@@ -288,7 +293,7 @@ async def search_and_download_titles(title_ids: list[str]):
             logger.info(f"Processing {title.title_id}: {title.title}")
             
             # Skip if already downloaded
-            if (settings.books.dir / f"{title.title_id}.epub").exists():
+            if (save_dir / f"{title.title}_{title.title_id}.epub").exists():
                 logger.info(f"Book already downloaded: {title.title_id}")
                 continue
                 
@@ -296,14 +301,14 @@ async def search_and_download_titles(title_ids: list[str]):
             async with httpx.AsyncClient(
                 proxy=environ.get("PROXY") if environ.get("PROXY") else None,
                 timeout=TIMEOUT,
-                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10, keepalive_expiry=5.0)
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10, keepalive_expiry=5.0),
             ) as session:
                 processed_title = camel_to_string(title.title)
                 search_query = f'{processed_title} {title.author if title.author else ""}'
                 results = await search(session, q=search_query)
                 
                 if not results:
-                    logger.warning(f"No results found for {title.title_id}")
+                    logger.warning(f"No results found for {title.title_id} {search_query}")
                     continue
                 
                 # Try each search result
@@ -325,7 +330,7 @@ async def search_and_download_titles(title_ids: list[str]):
                             response.raise_for_status()
                             
                             # Save book
-                            with open(settings.books.dir / f"{title.title_id}.epub", "wb") as f:
+                            with open(save_dir / f"{title.title}_{title.title_id}.epub", "wb") as f:
                                 f.write(response.content)
                             saved = True
                             logger.info(f"Successfully downloaded: {title.title_id}")
@@ -391,11 +396,26 @@ if __name__ == "__main__":
         help="Title ids to download",
     )
 
+    parser.add_argument(
+        "--titles_file",
+        type=str,
+        default=None,
+        help="Path to file containing titles to download.",
+    )
+    parser.add_argument(
+        "--save_dir",
+        type=str,
+        default=settings.books.dir,
+        help="Path to save directory",
+    )
+    
+
     args = parser.parse_args()
     if args.scrape:
         anyio.run(get_tvtropes_titles_from_libgen)
     elif args.download:
         download_books_scraped(args.scraped_list_path, args.limit, args.offset, args.title_ids.split(',') if args.title_ids else [])
     elif args.title_ids:
-        anyio.run(search_and_download_titles, args.title_ids.split(','))
-            
+        anyio.run(search_and_download_by_ids, Path(args.save_dir), args.title_ids.split(','))
+    elif args.titles_file:
+        anyio.run(search_and_download_by_file, Path(args.save_dir), args.titles_file)
