@@ -15,4 +15,4 @@ if __name__ == "__main__":
     print(f"{camel_to_string("HelloWorld")=}")
     print(f"{camel_to_string("OGuarani")=}")
     print(f"{camel_to_string("TheChocolateWar121")=}")
-    print(f"{camel_to_string("ITSSF")=}")
+    print(f"{camel_to_string("TheITSSF")=}")
